@@ -304,11 +304,15 @@ void led_bit(uint8_t position, bool state) {
     uint32_t gpio = 0xFFFFFFFFU;
     if (position == 0) {
         gpio = LED_ACT_GPIO_PIN;
-    } else if (position == 1) {
+    }
+    else if (position == 1) {
         gpio = LED_RUN_GPIO_PIN;
-    } else if (position == 2) {
+    }
+    /*
+    else if (position == 2) {
         gpio = LED_CON_GPIO_PIN;
     }
+    */
 
     if (gpio != 0xFFFFFFFFU) {
         if (state) {
@@ -320,11 +324,13 @@ void led_bit(uint8_t position, bool state) {
 }
 
 void led_num(uint8_t value) {
+    /*
     if (value & 0x4) {
         gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     } else {
         gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     }
+    */
     if (value & 0x2) {
         gpio_clear(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
     } else {
