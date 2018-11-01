@@ -16,19 +16,19 @@
 
 # Be silent per default, but 'make V=1' will show all compiler calls.
 ifneq ($(V),1)
-Q              := @
-NULL           := 2>/dev/null
-MAKE           := $(MAKE) --no-print-directory
+Q			  := @
+NULL		   := 2>/dev/null
+MAKE		   := $(MAKE) --no-print-directory
 endif
 export V
 
-BUILD_DIR      ?= ./build
+BUILD_DIR	  ?= ./build
 
-all: DAP42.bin DAP42DC.bin KITCHEN42.bin \
-     DAP103.bin DAP103-DFU.bin \
-     DAP103-NUCLEO-STBOOT.bin \
-     BRAINv3.3.bin \
-     DAP42K6U.bin
+all: UMDK-RF.bin DAP42.bin DAP42DC.bin KITCHEN42.bin \
+	 DAP103.bin DAP103-DFU.bin \
+	 DAP103-NUCLEO-STBOOT.bin \
+	 BRAINv3.3.bin \
+	 DAP42K6U.bin
 clean:
 	$(Q)$(RM) $(BUILD_DIR)/*.bin
 	$(Q)$(MAKE) -C src/ clean
@@ -37,51 +37,66 @@ clean:
 
 $(BUILD_DIR):
 	$(Q)mkdir -p $(BUILD_DIR)
+	
+UMDK-RF.bin: | $(BUILD_DIR)
+	@printf "  BUILD $(@)\n"
+	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ clean
+	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/UMDK-RF.dfu
 
 DAP42.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42.dfu
 
 DAP42DC.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/ clean
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42DC.dfu
 
 KITCHEN42.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/ clean
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/KITCHEN42.dfu
 
 DAP103.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103.dfu
 
 DAP103-DFU.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103-DFU.dfu
 
 BRAINv3.3.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/ clean
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/BRAINv3.3.dfu
 
 DAP42K6U.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/ clean
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42K6U.dfu
 
 DAP103-NUCLEO-STBOOT.bin: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/ clean
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103-NUCLEO-STBOOT.dfu
