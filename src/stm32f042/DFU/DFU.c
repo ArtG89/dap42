@@ -95,8 +95,7 @@ void DFU_maybe_jump_to_bootloader(void) {
             /* If BOOT_SEL is set, drive the BOOT0 pin high so that the
                ROM bootloader will enter DFU mode */
             rcc_periph_clock_enable(nBOOT0_GPIO_CLOCK);
-            gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
-            gpio_set(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN);
+            gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, nBOOT0_GPIO_PIN);
         }
 
         /* Jump to the ROM bootloader */

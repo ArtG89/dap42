@@ -22,11 +22,13 @@
 #include <libopencm3/stm32/crs.h>
 #include <libopencm3/stm32/gpio.h>
 #include <libopencm3/stm32/timer.h>
+#include <libopencm3/stm32/flash.h>
 
 #include "tick.h"
 #include "target.h"
 #include "config.h"
 #include "DAP/CMSIS_DAP_config.h"
+#include "DFU/DFU.h"
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
@@ -94,6 +96,7 @@ void tim2_isr(void)
             }
         }
         
+        /* Short circuit on 5V rail for 100 ms */
         if (target_power_failure == 100) {
             if (blink_counter == 0) {
                 blink_counter = blink_period_fail;
@@ -246,7 +249,13 @@ void gpio_setup(void) {
     rcc_periph_clock_enable(RCC_GPIOA);
     rcc_periph_clock_enable(RCC_GPIOB);
     rcc_periph_clock_enable(RCC_GPIOF);
-
+    
+    button_setup();
+    
+    /* reboot STM DFU bootloader if button is pressed */
+    if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
+        DFU_reset_and_jump_to_bootloader();
+    }
 
     /* Setup LEDs as open-drain outputs */
     gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_LOW, LED_CON_GPIO_PIN);
@@ -279,7 +288,6 @@ void gpio_setup(void) {
 
     button1_counter = 100;
     
-    button_setup();
     tim_setup();
 }
 
