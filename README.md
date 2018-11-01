@@ -4,6 +4,14 @@ The dap42 project is an open-source firmware and [hardware design](https://githu
 This project is stable - it has been proven in the field by a few dozen users and all core functionality has been tested.
 
 ## Current features
+### Unwired Devices
+
+UMDK-RF target was added to support UMDK-RF v.1.07 board by Unwired Devices. `make UMDK-RF` to build it.
+
+Changes: 
+* BOOT0 pin disabled, power up board with BOOT0 tied to GND to enter STM32 DFU
+* UMDK-RF specific functions added (power control, target BOOT0 control etc.)
+
 ### Firmware
 * [Serial Wire Debug](http://www.arm.com/products/system-ip/debug-trace/coresight-soc-components/serial-wire-debug.php) (SWD) access over [CMSIS-DAP 1.0](http://www.arm.com/products/processors/cortex-m/cortex-microcontroller-software-interface-standard.php) HID interface (tested with [OpenOCD](http://openocd.org) and [LPCXpresso](https://www.lpcware.com/lpcxpresso))
 * CDC-ACM USB-serial bridge
