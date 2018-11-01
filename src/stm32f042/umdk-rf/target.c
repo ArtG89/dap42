@@ -231,26 +231,34 @@ static void tim_setup(void)
 }
 
 static void button_setup(void) {
-    /* Set PB8 to an input */
+    /* Set BOOT0 pin to an input */
     gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
 }
 
-void gpio_setup(void) {
-    /*
-      Button on PB8
-      LED0, 1, 2 on PA0, PA1, PA4
-      TX, RX (MCU-side) on PA2, PA3
-      TGT_RST on PB1
-      TGT_SWDIO, TGT_SWCLK on PA5, PA6
-      TGT_SWO on PA7
-    */
+#define FLASH_OBP_RDP 0x1FFFF800
+#define FLASH_OBP_RDP_KEY 0x55AA
+#define FLASH_OBP_USR 0x1FFFF802
+#define FLASH_OBP_USR_KEY 0x807F
 
+void gpio_setup(void) {
     /* Enable GPIO clocks. */
     rcc_periph_clock_enable(RCC_GPIOA);
     rcc_periph_clock_enable(RCC_GPIOB);
     rcc_periph_clock_enable(RCC_GPIOF);
     
     button_setup();
+    
+    if (FLASH_OBR & FLASH_OBR_BOOT_SEL) {
+        flash_unlock();        
+        flash_erase_option_bytes();
+        
+        /* reset BOOT_SEL bit to disable BOOT0 pin */
+        flash_program_option_bytes(FLASH_OBP_USR, FLASH_OBP_USR_KEY);
+        /* restore default RDP value */
+        flash_program_option_bytes(FLASH_OBP_RDP, FLASH_OBP_RDP_KEY);
+        
+        flash_lock();
+    }
     
     /* reboot STM DFU bootloader if button is pressed */
     if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
