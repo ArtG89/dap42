@@ -24,11 +24,11 @@ export V
 
 BUILD_DIR	  ?= ./build
 
-all: UMDK-RF.bin DAP42.bin DAP42DC.bin KITCHEN42.bin \
-	 DAP103.bin DAP103-DFU.bin \
-	 DAP103-NUCLEO-STBOOT.bin \
-	 BRAINv3.3.bin \
-	 DAP42K6U.bin
+all: UMDK-RF DAP42 DAP42DC KITCHEN42 \
+	 DAP103 DAP103-DFU \
+	 DAP103-NUCLEO-STBOOT \
+	 BRAINv3.3 \
+	 DAP42K6U
 clean:
 	$(Q)$(RM) $(BUILD_DIR)/*.bin
 	$(Q)$(MAKE) -C src/ clean
@@ -38,65 +38,65 @@ clean:
 $(BUILD_DIR):
 	$(Q)mkdir -p $(BUILD_DIR)
 	
-UMDK-RF.bin: | $(BUILD_DIR)
+UMDK-RF: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ clean
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/UMDK-RF.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP42.bin: | $(BUILD_DIR)
+DAP42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP42DC.bin: | $(BUILD_DIR)
+DAP42DC: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/ clean
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42DC.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-KITCHEN42.bin: | $(BUILD_DIR)
+KITCHEN42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/ clean
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/KITCHEN42.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP103.bin: | $(BUILD_DIR)
+DAP103: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP103-DFU.bin: | $(BUILD_DIR)
+DAP103-DFU: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/ clean
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103-DFU.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-BRAINv3.3.bin: | $(BUILD_DIR)
+BRAINv3.3: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/ clean
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/BRAINv3.3.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP42K6U.bin: | $(BUILD_DIR)
+DAP42K6U: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/ clean
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP42K6U.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 
-DAP103-NUCLEO-STBOOT.bin: | $(BUILD_DIR)
+DAP103-NUCLEO-STBOOT: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/ clean
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@)
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/DAP103-NUCLEO-STBOOT.dfu
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
