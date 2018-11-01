@@ -135,10 +135,15 @@ Provides definitions about:
 
 #define LED_CON_GPIO_PORT       GPIOF
 #define LED_CON_GPIO_PIN        GPIO0 /* PF0 */
+#define LED_CON_DISABLED        1
+
 #define LED_RUN_GPIO_PORT       GPIOF
 #define LED_RUN_GPIO_PIN        GPIO1 /* PF1 */
+#define LED_RUN_DISABLED        0
+
 #define LED_ACT_GPIO_PORT       GPIOF
-#define LED_ACT_GPIO_PIN        GPIO1 /* NOT USED */
+#define LED_ACT_GPIO_PIN        GPIO1 /* PF1 */
+#define LED_ACT_DISABLED        0
 
 #define SWDIO_GPIO_PIN_NUM      0
 

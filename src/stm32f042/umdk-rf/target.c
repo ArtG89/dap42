@@ -303,16 +303,20 @@ void target_console_init(void) {
 void led_bit(uint8_t position, bool state) {
     uint32_t gpio = 0xFFFFFFFFU;
     if (position == 0) {
+#if !defined(LED_ACT_DISABLED) || !LED_ACT_DISABLED
         gpio = LED_ACT_GPIO_PIN;
+#endif
     }
+#if !defined(LED_RUN_DISABLED) || !LED_RUN_DISABLED
     else if (position == 1) {
         gpio = LED_RUN_GPIO_PIN;
     }
-    /*
+#endif
+#if !defined(LED_CON_DISABLED) || !LED_CON_DISABLED
     else if (position == 2) {
         gpio = LED_CON_GPIO_PIN;
     }
-    */
+#endif
 
     if (gpio != 0xFFFFFFFFU) {
         if (state) {
@@ -324,21 +328,27 @@ void led_bit(uint8_t position, bool state) {
 }
 
 void led_num(uint8_t value) {
-    /*
+#if !defined(LED_CON_DISABLED) || !LED_CON_DISABLED
     if (value & 0x4) {
         gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     } else {
         gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     }
-    */
+#endif
+    
+#if !defined(LED_RUN_DISABLED) || !LED_RUN_DISABLED
     if (value & 0x2) {
         gpio_clear(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
     } else {
         gpio_set(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
     }
+#endif
+
+#if !defined(LED_ACT_DISABLED) || !LED_ACT_DISABLED
     if (value & 0x1) {
         gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     } else {
         gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     }
+#endif
 }
