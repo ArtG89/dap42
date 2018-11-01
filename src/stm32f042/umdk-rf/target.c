@@ -117,13 +117,14 @@ void tim2_isr(void)
             target_enable_power--;
             
             if (target_enable_power == 0) {
-                if (gpio_get(POWER_INPUT_EN_PORT, POWER_INPUT_EN_PIN) == 0) {    
+                if (gpio_get(POWER_SENSE_PORT, POWER_SENSE_PIN) == 0) {    
                     /* Enable output power */
                     gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
                     
                     /* Release reset in 250 ms */
                     target_release_reset = 250;
                 }
+                target_release_reset = 1;
                 target_power_state = true;
             }
         }
@@ -283,8 +284,11 @@ void gpio_setup(void) {
     gpio_set_output_options(TARGET_BOOT_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, TARGET_BOOT_PIN);
     gpio_mode_setup(TARGET_BOOT_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TARGET_BOOT_PIN);
     
-    /* Power sense pin */
+    /* Power fault pin */
     gpio_mode_setup(POWER_FAULT_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, POWER_FAULT_PIN);
+    
+    /* 5V sense pin */
+    gpio_mode_setup(POWER_SENSE_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, POWER_SENSE_PIN);
     
     /* Input power enable pin */
     gpio_set_output_options(POWER_INPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, POWER_INPUT_EN_PIN);
