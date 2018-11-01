@@ -19,7 +19,7 @@
 #ifndef CONFIG_H_INCLUDED
 #define CONFIG_H_INCLUDED
 
-#define PRODUCT_NAME "DAP42"
+#define PRODUCT_NAME "UMDK-RF/DAP42"
 #define REMAP_USB 1
 
 #define CAN_RX_AVAILABLE 1
@@ -53,6 +53,24 @@
 #define nBOOT0_GPIO_CLOCK RCC_GPIOB
 #define nBOOT0_GPIO_PORT GPIOB
 #define nBOOT0_GPIO_PIN  GPIO8
+
+#define POWER_OUTPUT_EN_PORT    GPIOA
+#define POWER_OUTPUT_EN_PIN     GPIO4
+
+#define POWER_INPUT_EN_PORT     GPIOA
+#define POWER_INPUT_EN_PIN      GPIO13
+
+#define POWER_SENSE_PORT        GPIOA
+#define POWER_SENSE_PIN         GPIO14
+
+#define POWER_FAULT_PORT        GPIOB
+#define POWER_FAULT_PIN         GPIO1
+
+#define CURRENT_SENSE_PORT      GPIOA
+#define CURRENT_SENSE_PIN       GPIO6
+
+#define TARGET_BOOT_PORT        GPIOA
+#define TARGET_BOOT_PIN         GPIO7
 
 /* Word size for usart_recv and usart_send */
 typedef uint8_t usart_word_t;

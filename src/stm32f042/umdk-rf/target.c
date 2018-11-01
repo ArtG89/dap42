@@ -22,6 +22,7 @@
 
 #include "target.h"
 #include "config.h"
+#include "DAP/CMSIS_DAP_config.h"
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
@@ -39,10 +40,10 @@ void clock_setup(void) {
 
 static void button_setup(void) {
     /* Enable GPIOB clock. */
-    rcc_periph_clock_enable(RCC_GPIOB);
+    rcc_periph_clock_enable(nBOOT0_GPIO_CLOCK);
 
     /* Set PB8 to an input */
-    gpio_mode_setup(GPIOB, GPIO_MODE_INPUT, GPIO_PUPD_NONE, GPIO8);
+    gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
 }
 
 void gpio_setup(void) {
@@ -55,17 +56,18 @@ void gpio_setup(void) {
       TGT_SWO on PA7
     */
 
-    /* Enable GPIOA and GPIOB clocks. */
+    /* Enable GPIO clocks. */
     rcc_periph_clock_enable(RCC_GPIOA);
     rcc_periph_clock_enable(RCC_GPIOB);
+    rcc_periph_clock_enable(RCC_GPIOF);
 
 
     /* Setup LEDs as open-drain outputs */
-    gpio_set_output_options(GPIOA, GPIO_OTYPE_OD, GPIO_OSPEED_LOW,
-                            GPIO0 | GPIO1 | GPIO4);
+    gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_LOW,
+                            LED_CON_GPIO_PIN | LED_RUN_GPIO_PIN | LED_ACT_GPIO_PIN);
 
-    gpio_mode_setup(GPIOA, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE,
-                    GPIO0 | GPIO1 | GPIO4);
+    gpio_mode_setup(LED_CON_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE,
+                    LED_CON_GPIO_PIN | LED_RUN_GPIO_PIN | LED_ACT_GPIO_PIN);
     button_setup();
 }
 
@@ -81,36 +83,36 @@ void target_console_init(void) {
 void led_bit(uint8_t position, bool state) {
     uint32_t gpio = 0xFFFFFFFFU;
     if (position == 0) {
-        gpio = GPIO4;
+        gpio = LED_ACT_GPIO_PIN;
     } else if (position == 1) {
-        gpio = GPIO1;
+        gpio = LED_RUN_GPIO_PIN;
     } else if (position == 2) {
-        gpio = GPIO0;
+        gpio = LED_CON_GPIO_PIN;
     }
 
     if (gpio != 0xFFFFFFFFU) {
         if (state) {
-            gpio_clear(GPIOA, gpio);
+            gpio_clear(LED_CON_GPIO_PORT, gpio);
         } else {
-            gpio_set(GPIOA, gpio);
+            gpio_set(LED_CON_GPIO_PORT, gpio);
         }
     }
 }
 
 void led_num(uint8_t value) {
     if (value & 0x4) {
-        gpio_clear(GPIOA, GPIO0);
+        gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     } else {
-        gpio_set(GPIOA, GPIO0);
+        gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
     }
     if (value & 0x2) {
-        gpio_clear(GPIOA, GPIO1);
+        gpio_clear(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
     } else {
-        gpio_set(GPIOA, GPIO1);
+        gpio_set(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
     }
     if (value & 0x1) {
-        gpio_clear(GPIOA, GPIO4);
+        gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     } else {
-        gpio_set(GPIOA, GPIO4);
+        gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     }
 }

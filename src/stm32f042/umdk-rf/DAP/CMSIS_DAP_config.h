@@ -127,19 +127,19 @@ Provides definitions about:
 ///@}
 
 #define SWCLK_GPIO_PORT         GPIOA
-#define SWCLK_GPIO_PIN          GPIO6
+#define SWCLK_GPIO_PIN          GPIO1 /* PA1 */
 #define SWDIO_GPIO_PORT         GPIOA
-#define SWDIO_GPIO_PIN          GPIO5
-#define nRESET_GPIO_PORT        GPIOB
-#define nRESET_GPIO_PIN         GPIO1
+#define SWDIO_GPIO_PIN          GPIO0 /* PA0 */
+#define nRESET_GPIO_PORT        GPIOA
+#define nRESET_GPIO_PIN         GPIO5 /* PA5 */
 
-#define LED_CON_GPIO_PORT       GPIOA
-#define LED_CON_GPIO_PIN        GPIO0
-#define LED_RUN_GPIO_PORT       GPIOA
-#define LED_RUN_GPIO_PIN        GPIO1
-#define LED_ACT_GPIO_PORT       GPIOA
-#define LED_ACT_GPIO_PIN        GPIO4
+#define LED_CON_GPIO_PORT       GPIOF
+#define LED_CON_GPIO_PIN        GPIO0 /* PF0 */
+#define LED_RUN_GPIO_PORT       GPIOF
+#define LED_RUN_GPIO_PIN        GPIO1 /* PF1 */
+#define LED_ACT_GPIO_PORT       GPIOF
+#define LED_ACT_GPIO_PIN        GPIO1 /* NOT USED */
 
-#define SWDIO_GPIO_PIN_NUM      5
+#define SWDIO_GPIO_PIN_NUM      0
 
 #endif
