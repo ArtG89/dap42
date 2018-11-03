@@ -64,6 +64,9 @@ static uint32_t vdda = 0;
 static uint32_t current_report_counter = 0;
 
 static void disable_power(void) {
+    /* Stop ADC */
+    adc_power_off(ADC1);
+    
     /* Disable output power */
     gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     /* Disable input power */
@@ -73,9 +76,6 @@ static void disable_power(void) {
 
     target_power_state = false;
     target_boot_state = false;
-    
-    /* stop current monitoring */
-    ADC_CR(ADC1) |= ADC_CR_ADSTP;
     
     vcdc_println("[INF] power disabled");
 }
@@ -117,12 +117,12 @@ static void adc_measure_current(void) {
     adc_enable_eoc_interrupt(ADC1);
     
     /* PA6 channel only */
-    uint8_t adc_channels[1] = { 6 };
-    adc_set_regular_sequence(ADC1, 1, adc_channels);
+    uint8_t adc_channels = 6;
+    adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
     adc_power_on(ADC1);
     
-    /* start ADC */
+    /* start ADC measurements */
     adc_start_conversion_regular(ADC1);
 }
 
@@ -141,8 +141,8 @@ static void adc_measure_vdda(void) {
     adc_disable_eoc_interrupt(ADC1);
     
     /* VREF channel only */
-    uint8_t adc_channels[1] = { 17 };
-    adc_set_regular_sequence(ADC1, 1, adc_channels);
+    uint8_t adc_channels = 17;
+    adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
     adc_power_on(ADC1);
     
@@ -172,15 +172,18 @@ void adc_comp_isr(void)
     adc_count++;
 }
 
+/* ticks every 1 ms */
 void tim3_isr(void)
 {
     /* calculate average ADC value */
     if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
         current_report_counter++;
         
+        /* every 100 ms */
         if (current_report_counter == 100) {
             current_report_counter = 0;
             char cur_str[10] = { 0 };
+            /* 100 ms average */
             uint32_t current = adc_result/adc_count;
             adc_result = 0;
             adc_count = 0;
@@ -230,6 +233,7 @@ void tim3_isr(void)
             }
             blink_counter--;
         } else {
+            /* Blink a LED if target bootloader mode active */
             if (target_boot_state) {
                 if (blink_counter == 0) {
                     blink_counter = blink_period_boot;
@@ -321,6 +325,7 @@ void tim3_isr(void)
     }
 }
 
+/* starts ADC conversion every 10 us */
 static void tim2_setup(void)
 {
     rcc_periph_clock_enable(RCC_TIM2);
@@ -336,6 +341,7 @@ static void tim2_setup(void)
     timer_enable_counter(TIM2);
 }
 
+/* starts button and data processing every 1 ms */
 static void tim3_setup(void)
 {
     /* Enable TIM3 clock. */
@@ -397,6 +403,7 @@ void gpio_setup(void) {
 
     button_setup();
 
+    /* disable BOOT0 pin if enabled */
     if (FLASH_OBR & FLASH_OBR_BOOT_SEL) {
         flash_unlock();    
         flash_erase_option_bytes();
@@ -409,7 +416,7 @@ void gpio_setup(void) {
         flash_lock();
     }
 
-    /* reboot STM DFU bootloader if button is pressed */
+    /* jump to STM DFU bootloader if button is pressed */
     if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
         DFU_reset_and_jump_to_bootloader();
     }
@@ -446,8 +453,10 @@ void gpio_setup(void) {
     gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, POWER_OUTPUT_EN_PIN);
     gpio_mode_setup(POWER_OUTPUT_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, POWER_OUTPUT_EN_PIN);
 
+    /* Power on in 100 ms by TIM3 */
     button1_counter = 100;
 
+    /* Setup timers */
     tim2_setup();
     tim3_setup();
 }
