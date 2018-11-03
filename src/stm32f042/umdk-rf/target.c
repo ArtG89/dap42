@@ -29,6 +29,7 @@
 #include "config.h"
 #include "DAP/CMSIS_DAP_config.h"
 #include "DFU/DFU.h"
+#include "USB/vcdc.h"
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
