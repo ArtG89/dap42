@@ -189,9 +189,9 @@ void tim3_isr(void)
             adc_count = 0;
             
             /* convert to mV */
-            /* then convert to uA with 100 V/V INA214 scale and 0.51 Ohm shunt */
-            /* 1 uA = 0.00051 mV on shunt = 0.051 mV on ADC input */
-            current = (196 * current * vdda) / 40950;
+            /* then convert to uA with 50 V/V INA213 scale and 1 Ohm shunt */
+            /* 1 uA = 0.001 mV on shunt = 0.05 mV on ADC input */
+            current = (20 * current * vdda) / 4095;
             itoa(current, cur_str, 10);
             vcdc_print("[CUR] ");
             vcdc_println(cur_str);
