@@ -8,9 +8,10 @@ This project is stable - it has been proven in the field by a few dozen users an
 
 UMDK-RF target was added to support UMDK-RF v.1.07 board by Unwired Devices. `make UMDK-RF` to build it.
 
-Changes: 
+Changes:
 * BOOT0 pin disabled, power up board with BOOT0 tied to GND to enter STM32 DFU
 * UMDK-RF specific functions added (power control, target BOOT0 control etc.)
+* Current consumption measurements on boards equipped with INA214 sensor and shunt resistor
 
 ### Firmware
 * [Serial Wire Debug](http://www.arm.com/products/system-ip/debug-trace/coresight-soc-components/serial-wire-debug.php) (SWD) access over [CMSIS-DAP 1.0](http://www.arm.com/products/processors/cortex-m/cortex-microcontroller-software-interface-standard.php) HID interface (tested with [OpenOCD](http://openocd.org) and [LPCXpresso](https://www.lpcware.com/lpcxpresso))
