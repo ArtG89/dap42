@@ -28,6 +28,7 @@
 #include "tick.h"
 #include "target.h"
 #include "config.h"
+#include "console.h"
 #include "DAP/CMSIS_DAP_config.h"
 #include "DFU/DFU.h"
 #include "USB/vcdc.h"
@@ -222,6 +223,7 @@ void tim3_isr(void)
                 /* Release reset */
                 gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
                 vcdc_println("[INF] target reset");
+                console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
             }
         }
     
