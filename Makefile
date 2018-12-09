@@ -24,6 +24,8 @@ export V
 
 BUILD_DIR	  ?= ./build
 
+SIZE           = arm-none-eabi-size
+
 all: UMDK-RF DAP42 DAP42DC KITCHEN42 \
 	 DAP103 DAP103-DFU \
 	 DAP103-NUCLEO-STBOOT \
@@ -44,6 +46,7 @@ UMDK-RF: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 DAP42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -51,6 +54,7 @@ DAP42: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 DAP42DC: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -58,6 +62,7 @@ DAP42DC: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 KITCHEN42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -65,6 +70,7 @@ KITCHEN42: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 DAP103: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -72,6 +78,7 @@ DAP103: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 DAP103-DFU: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -79,6 +86,7 @@ DAP103-DFU: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(SIZE) src/DAP42.elf
 
 BRAINv3.3: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -86,6 +94,7 @@ BRAINv3.3: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
 
 DAP42K6U: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -93,6 +102,7 @@ DAP42K6U: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(SIZE) src/DAP42.elf
 
 DAP103-NUCLEO-STBOOT: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
@@ -100,3 +110,4 @@ DAP103-NUCLEO-STBOOT: | $(BUILD_DIR)
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
