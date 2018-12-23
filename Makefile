@@ -26,7 +26,7 @@ BUILD_DIR	  ?= ./build
 
 SIZE           = arm-none-eabi-size
 
-all: UMDK-RF DAP42 DAP42DC KITCHEN42 \
+all: UMDK-EMB UMDK-RF DAP42 DAP42DC KITCHEN42 \
 	 DAP103 DAP103-DFU \
 	 DAP103-NUCLEO-STBOOT \
 	 BRAINv3.3 \
@@ -44,6 +44,14 @@ UMDK-RF: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ clean
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
+	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
+	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
+	$(Q)$(SIZE) src/DAP42.elf
+    
+UMDK-RF: | $(BUILD_DIR)
+	@printf "  BUILD $(@)\n"
+	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/ clean
+	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/
 	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 	$(Q)$(SIZE) src/DAP42.elf
