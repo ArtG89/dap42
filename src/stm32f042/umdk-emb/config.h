@@ -50,27 +50,44 @@
 #define CONSOLE_RX_DMA_CHANNEL DMA_CHANNEL5
 
 #define DFU_AVAILABLE 1
-#define nBOOT0_GPIO_CLOCK RCC_GPIOB
-#define nBOOT0_GPIO_PORT GPIOB
-#define nBOOT0_GPIO_PIN  GPIO8
+#define nBOOT0_GPIO_CLOCK       RCC_GPIOB
+#define nBOOT0_GPIO_PORT        GPIOB
+#define nBOOT0_GPIO_PIN         GPIO8
 
 #define POWER_OUTPUT_EN_PORT    GPIOA
-#define POWER_OUTPUT_EN_PIN     GPIO4
+#define POWER_OUTPUT_EN_PIN     GPIO15
 
-#define POWER_INPUT_EN_PORT     GPIOA
-#define POWER_INPUT_EN_PIN      GPIO13
+#define CURRENT_SENSE_PORT      GPIOB
+#define CURRENT_SENSE_PIN       GPIO0
 
-#define POWER_SENSE_PORT        GPIOA
-#define POWER_SENSE_PIN         GPIO14
+#define CURRENT_OVERLOAD_PORT   GPIOB
+#define CURRENT_OVERLOAD_PIN    GPIO1
+#define CURRENT_OVERLOAD_IRQ    EXTI0
+#define CURRENT_OVERLOAD_NVIC   NVIC_EXTI0_1_IRQ
 
-#define POWER_FAULT_PORT        GPIOB
-#define POWER_FAULT_PIN         GPIO1
+#define CURRENT_RANGE1_PORT     GPIOA
+#define CURRENT_RANGE1_PIN      GPIO8
+#define CURRENT_RANGE2_PORT     GPIOA
+#define CURRENT_RANGE2_PIN      GPIO9
+#define CURRENT_RANGE3_PORT     GPIOA
+#define CURRENT_RANGE3_PIN      GPIO10
 
-#define CURRENT_SENSE_PORT      GPIOA
-#define CURRENT_SENSE_PIN       GPIO6
+#define TARGET_IFACE_EN_PORT    GPIOA
+#define TARGET_IFACE_EN_PIN     GPIO1
+#define TARGET_IFACE_BTN_PORT   GPIOF
+#define TARGET_IFACE_BTN_PIN    GPIO1
 
 #define TARGET_BOOT_PORT        GPIOA
-#define TARGET_BOOT_PIN         GPIO7
+#define TARGET_BOOT_PIN         GPIO4
+
+#define TIC33M_LOAD_PORT        GPIOB
+#define TIC33M_LOAD_PIN         GPIO7
+#define TIC33M_DIN_PORT         GPIOB
+#define TIC33M_DIN_PIN          GPIO6
+#define TIC33M_CLK_PORT         GPIOB
+#define TIC33M_CLK_PIN          GPIO4
+#define TIC33M_LCLK_PORT        GPIOB
+#define TIC33M_LCLK_PIN         GPIO5
 
 /* Word size for usart_recv and usart_send */
 typedef uint8_t usart_word_t;

@@ -24,6 +24,7 @@
 #include <libopencm3/stm32/timer.h>
 #include <libopencm3/stm32/flash.h>
 #include <libopencm3/stm32/adc.h>
+#include <libopencm3/stm32/exti.h>
 
 #include "tick.h"
 #include "target.h"
@@ -32,6 +33,9 @@
 #include "DAP/CMSIS_DAP_config.h"
 #include "DFU/DFU.h"
 #include "USB/vcdc.h"
+#include "tic33m.h"
+
+static tic33m tic33m_dev;
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
@@ -50,28 +54,29 @@ void clock_setup(void) {
 /* 1000 Hz frequency */
 static const uint16_t frequency = 1;
 static uint16_t button1_counter = 0;
+static uint16_t button2_counter = 0;
 static uint16_t target_release_reset = 0;
 static uint16_t target_release_boot = 0;
-static uint16_t target_enable_power = 0;
+/* static uint16_t target_enable_power = 0; */
 static bool target_power_state = false;
 static bool target_boot_state = false;
 static const uint16_t blink_period_boot = 1000;
-static const uint16_t blink_period_fail = 150;
+/* static const uint16_t blink_period_fail = 150; */
 static uint16_t blink_counter = 0;
 static uint16_t target_power_failure = 0;
-static volatile uint32_t adc_result = 0;
+static volatile uint64_t adc_result = 0;
 static volatile uint32_t adc_count = 0;
 static uint32_t vdda = 0;
 static uint32_t current_report_counter = 0;
+static uint8_t  current_power_range = 0;
+static bool is_interface_connected = false;
 
 static void disable_power(void) {
     /* Stop ADC */
     adc_power_off(ADC1);
     
     /* Disable output power */
-    gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
-    /* Disable input power */
-    gpio_clear(POWER_INPUT_EN_PORT, POWER_INPUT_EN_PIN);
+    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     /* Disable green LED */
     gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 
@@ -87,18 +92,18 @@ static void adc_setup_common(void) {
     gpio_mode_setup(CURRENT_SENSE_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, CURRENT_SENSE_PIN);
     
     adc_set_clk_source(ADC1, ADC_CLKSOURCE_ADC);
-	adc_calibrate(ADC1);
-	adc_set_operation_mode(ADC1, ADC_MODE_SCAN);
+    adc_calibrate(ADC1);
+    adc_set_operation_mode(ADC1, ADC_MODE_SCAN);
     adc_disable_discontinuous_mode(ADC1);
-	adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
-	adc_set_right_aligned(ADC1);
-	adc_disable_temperature_sensor();
+    adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
+    adc_set_right_aligned(ADC1);
+    adc_disable_temperature_sensor();
     
     /* ~5 us sampling time */
-	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
 
-	adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
-	adc_disable_analog_watchdog(ADC1);
+    adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
+    adc_disable_analog_watchdog(ADC1);
 }
 
 static void adc_measure_current(void) {
@@ -117,8 +122,8 @@ static void adc_measure_current(void) {
     /* Data processed by IRQ */
     adc_enable_eoc_interrupt(ADC1);
     
-    /* PA6 channel only */
-    uint8_t adc_channels = 6;
+    /* PB0 channel only */
+    uint8_t adc_channels = 8;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
     adc_power_on(ADC1);
@@ -169,13 +174,67 @@ static void adc_measure_vdda(void) {
 
 void adc_comp_isr(void)
 {
-    adc_result += adc_read_regular(ADC1);
+    uint32_t adc_sample = adc_read_regular(ADC1);
+    
+    switch (current_power_range) {
+        case 3:
+            adc_result += adc_sample*206050;
+            break;
+        case 2:
+            adc_result += adc_sample*1005;
+            break;
+        case 1:
+            adc_result += adc_sample*10;
+            break;
+        default:
+            break;
+    }
     adc_count++;
+    
+    if (adc_sample < 20) {
+        if (current_power_range == 3) {
+            /* make-before-break! */
+            gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+            gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+            current_power_range = 2;
+        } else {
+            if (current_power_range == 2) {
+                /* make-before-break! */
+                gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                current_power_range = 1;
+            }
+        }
+    }
+}
+
+void exti0_1_isr(void)
+{
+    exti_reset_request(EXTI0);
+    
+    if (current_power_range == 1) {
+        /* make-before-break! */
+        gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+        gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+        current_power_range = 2;
+    } else {
+        if (current_power_range == 2) {
+            /* make-before-break! */
+            gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+            gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+            current_power_range = 3;
+        }
+    }
 }
 
 /* ticks every 1 ms */
 void tim3_isr(void)
 {
+    /* every 10 ms */
+    if ((current_report_counter % 10) == 0) {
+        gpio_toggle(TIC33M_LCLK_PORT, TIC33M_LCLK_PIN);
+    }
+    
     /* calculate average ADC value */
     if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
         current_report_counter++;
@@ -190,12 +249,14 @@ void tim3_isr(void)
             adc_count = 0;
             
             /* convert to mV */
-            /* then convert to uA with 50 V/V INA213 scale and 1 Ohm shunt */
-            /* 1 uA = 0.001 mV on shunt = 0.05 mV on ADC input */
-            current = (20 * current * vdda) / 4095;
+            /* then convert to uA with 50 V/V INA213 scale and 515.125 Ohm shunt */
+            /* 1 uA = 0.515 mV on shunt = 25.75 mV on ADC input */
+            current = (10 * current * vdda) / (4095*2575);
             itoa(current, cur_str, 10);
             vcdc_print("[CUR] ");
             vcdc_println(cur_str);
+            
+            tic33m_print(current, 3);
         }
     }
     
@@ -208,14 +269,6 @@ void tim3_isr(void)
 
         timer_set_oc_value(TIM3, TIM_OC1, new_time);
     
-        if (target_power_state && (gpio_get(POWER_FAULT_PORT, POWER_FAULT_PIN) == 0)) {
-            target_power_failure++;
-            if (target_power_failure == 100) {
-                vcdc_println("[ERR] power failure");
-                disable_power();
-            }
-        }
-    
         if (target_release_reset) {
             target_release_reset--;
         
@@ -226,45 +279,14 @@ void tim3_isr(void)
                 console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
             }
         }
-    
-        /* Short circuit on 5V rail for 100 ms */
-        if (target_power_failure == 100) {
+
+        /* Blink a LED if target bootloader mode active */
+        if (target_boot_state) {
             if (blink_counter == 0) {
-                blink_counter = blink_period_fail;
+                blink_counter = blink_period_boot;
                 gpio_toggle(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
             }
             blink_counter--;
-        } else {
-            /* Blink a LED if target bootloader mode active */
-            if (target_boot_state) {
-                if (blink_counter == 0) {
-                    blink_counter = blink_period_boot;
-                    gpio_toggle(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-                }
-                blink_counter--;
-            }
-        }
-    
-        if (target_enable_power) {
-            target_enable_power--;
-        
-            if (target_enable_power == 0) {
-                if (gpio_get(POWER_SENSE_PORT, POWER_SENSE_PIN) == 0) {
-                    /* Enable output power */
-                    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
-                
-                    /* Release reset in 250 ms */
-                    target_release_reset = 250;
-                }
-                target_release_reset = 1;
-                target_power_state = true;
-                
-                /* start current monitoring */
-                adc_measure_vdda();
-                adc_measure_current();
-                
-                vcdc_println("[INF] power enabled");
-            }
         }
     
         if (target_release_boot) {
@@ -276,8 +298,25 @@ void tim3_isr(void)
                 vcdc_println("[INF] target bootloader activated");
             }
         }
+        
+        /* Check if INTERFACE DISCONNECT button is pressed */
+        if (gpio_get(TARGET_IFACE_BTN_PORT, TARGET_IFACE_BTN_PIN) == 0) {
+            button2_counter++;
+        } else {
+            /* button released */
+            if (button2_counter >= 100) {
+                if (is_interface_connected) {
+                    gpio_clear(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
+                    is_interface_connected = false;
+                } else {
+                    gpio_set(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
+                    is_interface_connected = true;
+                }
+            }
+            button2_counter = 0;
+        }
     
-        /* Check if button is pressed */
+        /* Check if POWER button is pressed */
         if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
             button1_counter++;
             if ((button1_counter == 1000) && target_power_state) {
@@ -309,15 +348,19 @@ void tim3_isr(void)
                     /* Set boot from flash */
                     gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN);
                     /* Enable input power */
-                    gpio_set(POWER_INPUT_EN_PORT, POWER_INPUT_EN_PIN);
+                    gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
                     /* enable green LED */
                     gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-                
-                    /* Enable output power if needed in 500 ms */
-                    target_enable_power = 500;
 
                     target_boot_state = false;
                     target_power_failure = 0;
+                    
+                    target_release_reset = 250;
+                    /* start current monitoring */
+                    adc_measure_vdda();
+                    adc_measure_current();
+                    
+                    vcdc_println("[INF] power enabled");
                 } else {
                     disable_power();
                 }
@@ -332,7 +375,7 @@ static void tim2_setup(void)
 {
     rcc_periph_clock_enable(RCC_TIM2);
 
-	/* Generates ~10 us clock */
+    /* Generates ~10 us clock */
     rcc_periph_reset_pulse(RST_TIM2);
     timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
     timer_set_period(TIM2, 1);
@@ -390,6 +433,8 @@ static void tim3_setup(void)
 static void button_setup(void) {
     /* Set BOOT0 pin to an input */
     gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
+    
+    gpio_mode_setup(TARGET_IFACE_BTN_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, TARGET_IFACE_BTN_PIN);
 }
 
 #define FLASH_OBP_RDP 0x1FFFF800
@@ -424,43 +469,78 @@ void gpio_setup(void) {
     }
 
     /* Setup LEDs as open-drain outputs */
-    gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_LOW, LED_CON_GPIO_PIN);
+    gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_CON_GPIO_PIN);
     gpio_mode_setup(LED_CON_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_CON_GPIO_PIN);
                 
-    gpio_set_output_options(LED_RUN_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_LOW, LED_RUN_GPIO_PIN);
+    gpio_set_output_options(LED_RUN_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_RUN_GPIO_PIN);
     gpio_mode_setup(LED_RUN_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_RUN_GPIO_PIN);
                 
-    gpio_set_output_options(LED_ACT_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_LOW, LED_ACT_GPIO_PIN);
+    gpio_set_output_options(LED_ACT_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_ACT_GPIO_PIN);
     gpio_mode_setup(LED_ACT_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_ACT_GPIO_PIN);
 
     /* Reset target pin */
-    gpio_set_output_options(nRESET_GPIO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, nRESET_GPIO_PIN);
+    gpio_set_output_options(nRESET_GPIO_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, nRESET_GPIO_PIN);
     gpio_mode_setup(nRESET_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, nRESET_GPIO_PIN);
 
     /* Boot from flash target pin */
-    gpio_set_output_options(TARGET_BOOT_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, TARGET_BOOT_PIN);
+    gpio_set_output_options(TARGET_BOOT_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TARGET_BOOT_PIN);
     gpio_mode_setup(TARGET_BOOT_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TARGET_BOOT_PIN);
 
-    /* Power fault pin */
-    gpio_mode_setup(POWER_FAULT_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, POWER_FAULT_PIN);
-
-    /* 5V sense pin */
-    gpio_mode_setup(POWER_SENSE_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLDOWN, POWER_SENSE_PIN);
-
-    /* Input power enable pin */
-    gpio_set_output_options(POWER_INPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, POWER_INPUT_EN_PIN);
-    gpio_mode_setup(POWER_INPUT_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, POWER_INPUT_EN_PIN);
+    /* Target interface enable pin */
+    gpio_set_output_options(TARGET_IFACE_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TARGET_IFACE_EN_PIN);
+    gpio_mode_setup(TARGET_IFACE_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TARGET_IFACE_EN_PIN);
 
     /* Output power enable pin */
-    gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_LOW, POWER_OUTPUT_EN_PIN);
+    gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, POWER_OUTPUT_EN_PIN);
     gpio_mode_setup(POWER_OUTPUT_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, POWER_OUTPUT_EN_PIN);
+    
+    /* Disable output power */
+    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+    
+    /* Overload IRQ */
+    gpio_mode_setup(CURRENT_OVERLOAD_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, CURRENT_OVERLOAD_PIN);
+    nvic_enable_irq(CURRENT_OVERLOAD_NVIC);
+    exti_select_source(EXTI0, CURRENT_OVERLOAD_PORT);
+    exti_set_trigger(CURRENT_OVERLOAD_IRQ, EXTI_TRIGGER_RISING);
+    exti_enable_request(CURRENT_OVERLOAD_IRQ);
+    
+    /* Current ranges select */
+    gpio_set_output_options(CURRENT_RANGE1_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, CURRENT_RANGE1_PIN);
+    gpio_mode_setup(CURRENT_RANGE1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE1_PIN);
+    gpio_set_output_options(CURRENT_RANGE2_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, CURRENT_RANGE2_PIN);
+    gpio_mode_setup(CURRENT_RANGE2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE2_PIN);
+    gpio_set_output_options(CURRENT_RANGE3_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, CURRENT_RANGE3_PIN);
+    gpio_mode_setup(CURRENT_RANGE3_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE3_PIN);
+    
+    /* 2.5A current range by default */
+    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+    current_power_range = 3;
 
     /* Power on in 100 ms by TIM3 */
-    button1_counter = 100;
+    /* button1_counter = 100; */
 
     /* Setup timers */
     tim2_setup();
     tim3_setup();
+    
+    gpio_set_output_options(TIC33M_LCLK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TIC33M_LCLK_PIN);
+    gpio_mode_setup(TIC33M_LCLK_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TIC33M_LCLK_PIN);
+    gpio_clear(TIC33M_LCLK_PORT, TIC33M_LCLK_PIN);
+    
+    tic33m_dev.load_port    = TIC33M_LOAD_PORT;
+    tic33m_dev.load_pin     = TIC33M_LOAD_PIN;
+    tic33m_dev.din_port     = TIC33M_DIN_PORT;
+    tic33m_dev.din_pin      = TIC33M_DIN_PIN;
+    tic33m_dev.clk_port     = TIC33M_CLK_PORT;
+    tic33m_dev.clk_pin      = TIC33M_CLK_PIN;
+    
+    tic33m_init(tic33m_dev);
+    
+    tic33m_print(0, 3);
+    
+    gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 }
 
 void target_console_init(void) {

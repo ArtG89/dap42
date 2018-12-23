@@ -48,7 +48,7 @@ UMDK-RF: | $(BUILD_DIR)
 	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
 	$(Q)$(SIZE) src/DAP42.elf
     
-UMDK-RF: | $(BUILD_DIR)
+UMDK-EMB: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/ clean
 	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/
