@@ -26,9 +26,13 @@ typedef struct {
     uint32_t din_pin;
     uint32_t clk_port;
     uint32_t clk_pin;
+    uint32_t lclk_port;
+    uint32_t lclk_pin;
 } tic33m;
 
-void tic33m_init(tic33m device);
-int tic33m_print(int32_t num, uint8_t precision);
+void tic33m_init(tic33m *dev);
+int  tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision);
+int  tic33m_display_time(tic33m *dev, uint32_t seconds);
+void tic33m_lclk(tic33m *dev);
 
 #endif /* TIC33M_H_INCLUDED */

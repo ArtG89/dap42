@@ -70,6 +70,8 @@ static uint32_t vdda = 0;
 static uint32_t current_report_counter = 0;
 static uint8_t  current_power_range = 0;
 static bool is_interface_connected = false;
+static uint64_t energy_accumultated_uah = 0;
+static uint32_t seconds_passed = 0;
 
 static void disable_power(void) {
     /* Stop ADC */
@@ -82,6 +84,11 @@ static void disable_power(void) {
 
     target_power_state = false;
     target_boot_state = false;
+    
+    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+    gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+    current_power_range = 3;
     
     vcdc_println("[INF] power disabled");
 }
@@ -175,7 +182,7 @@ static void adc_measure_vdda(void) {
 void adc_comp_isr(void)
 {
     uint32_t adc_sample = adc_read_regular(ADC1);
-    
+    /*
     switch (current_power_range) {
         case 3:
             adc_result += adc_sample*206050;
@@ -189,9 +196,11 @@ void adc_comp_isr(void)
         default:
             break;
     }
+    */
+    adc_result += adc_sample;
     adc_count++;
-    
-    if (adc_sample < 20) {
+#if 0
+    if (adc_sample < 10) {
         if (current_power_range == 3) {
             /* make-before-break! */
             gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
@@ -206,58 +215,105 @@ void adc_comp_isr(void)
             }
         }
     }
+    
+    if (adc_sample > 4090) {
+        if (current_power_range == 1) {
+            /* make-before-break! */
+            gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+            gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+            current_power_range = 2;
+        } else {
+            if (current_power_range == 2) {
+                /* make-before-break! */
+                gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                current_power_range = 3;
+            }
+        }
+    }
+#endif
 }
 
+/*
 void exti0_1_isr(void)
 {
-    exti_reset_request(EXTI0);
+    exti_reset_request(CURRENT_OVERLOAD_IRQ);
     
     if (current_power_range == 1) {
-        /* make-before-break! */
         gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-        gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
         current_power_range = 2;
+        
+        if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
+            gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+            gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+            current_power_range = 3;
+        }
+        
+        gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
     } else {
         if (current_power_range == 2) {
-            /* make-before-break! */
             gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
             gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
             current_power_range = 3;
         }
     }
 }
+*/
+
+volatile bool display_counter = false;
 
 /* ticks every 1 ms */
 void tim3_isr(void)
 {
+    current_report_counter++;
+    
     /* every 10 ms */
     if ((current_report_counter % 10) == 0) {
-        gpio_toggle(TIC33M_LCLK_PORT, TIC33M_LCLK_PIN);
+        tic33m_lclk(&tic33m_dev);
     }
     
-    /* calculate average ADC value */
-    if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
-        current_report_counter++;
-        
-        /* every 100 ms */
-        if (current_report_counter == 100) {
-            current_report_counter = 0;
+    /* every 100 ms */
+    if ((current_report_counter % 100) == 0) {
+        /* calculate average ADC value */
+        if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
             char cur_str[10] = { 0 };
             /* 100 ms average */
-            uint32_t current = adc_result/adc_count;
-            adc_result = 0;
-            adc_count = 0;
-            
+            uint32_t current = adc_result; // /adc_count;
+
             /* convert to mV */
             /* then convert to uA with 50 V/V INA213 scale and 515.125 Ohm shunt */
             /* 1 uA = 0.515 mV on shunt = 25.75 mV on ADC input */
-            current = (10 * current * vdda) / (4095*2575);
-            itoa(current, cur_str, 10);
+            //current = (10 * current * vdda) / (4095*2575);
+            itoa(adc_count, cur_str, 10);
             vcdc_print("[CUR] ");
             vcdc_println(cur_str);
             
-            tic33m_print(current, 3);
+            /* microamperes * 100ms */
+            energy_accumultated_uah += current;
+            
+            adc_result = 0;
+            adc_count = 0;
         }
+    }
+    
+    /* every 2 seconds */
+    if (current_report_counter == 2000) {
+        if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
+            seconds_passed += 2;
+        }
+        
+        if (display_counter) {
+            /* display current */
+            /* convert from uA*100ms to uA*h */
+            tic33m_display_number(&tic33m_dev, energy_accumultated_uah/36000, 3);
+        } else {
+            /* display time */
+            tic33m_display_time(&tic33m_dev, seconds_passed);
+        }
+        
+        display_counter = !display_counter;
+        
+        current_report_counter = 0;
     }
     
     if (timer_get_flag(TIM3, TIM_SR_CC1IF)) {
@@ -347,8 +403,17 @@ void tim3_isr(void)
                     gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
                     /* Set boot from flash */
                     gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN);
-                    /* Enable input power */
+                    /* Reset accumulated energy */
+                    energy_accumultated_uah = 0;
+                    seconds_passed = 0;
+                    /* Enable DC/DC power */
                     gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+                    /* Enable current shunt (range 3 by default) */
+                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                    current_power_range = 3;
+                    
                     /* enable green LED */
                     gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 
@@ -409,9 +474,9 @@ static void tim3_setup(void)
         TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
 
     /*
-     * Sets the prescaler to have the timer run at 2kHz -> IRQs at 1 kHz
+     * Sets the prescaler to have the timer run at 1kHz
      */
-    timer_set_prescaler(TIM3, (rcc_apb1_frequency / 2000));
+    timer_set_prescaler(TIM3, (rcc_apb1_frequency / 1000));
 
     /* Disable preload. */
     timer_disable_preload(TIM3);
@@ -497,12 +562,13 @@ void gpio_setup(void) {
     /* Disable output power */
     gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     
-    /* Overload IRQ */
-    gpio_mode_setup(CURRENT_OVERLOAD_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, CURRENT_OVERLOAD_PIN);
+    /* Configure current overload IRQ */
+//    rcc_peripheral_enable_clock(&RCC_APB2ENR, RCC_APB2ENR_SYSCFGCOMPEN);
     nvic_enable_irq(CURRENT_OVERLOAD_NVIC);
-    exti_select_source(EXTI0, CURRENT_OVERLOAD_PORT);
-    exti_set_trigger(CURRENT_OVERLOAD_IRQ, EXTI_TRIGGER_RISING);
-    exti_enable_request(CURRENT_OVERLOAD_IRQ);
+    gpio_mode_setup(CURRENT_OVERLOAD_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, CURRENT_OVERLOAD_PIN);
+//    exti_select_source(CURRENT_OVERLOAD_IRQ, CURRENT_OVERLOAD_PORT);
+//    exti_set_trigger(CURRENT_OVERLOAD_IRQ, EXTI_TRIGGER_RISING);
+//    exti_enable_request(CURRENT_OVERLOAD_IRQ);
     
     /* Current ranges select */
     gpio_set_output_options(CURRENT_RANGE1_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, CURRENT_RANGE1_PIN);
@@ -535,10 +601,12 @@ void gpio_setup(void) {
     tic33m_dev.din_pin      = TIC33M_DIN_PIN;
     tic33m_dev.clk_port     = TIC33M_CLK_PORT;
     tic33m_dev.clk_pin      = TIC33M_CLK_PIN;
+    tic33m_dev.lclk_port    = TIC33M_LCLK_PORT;
+    tic33m_dev.lclk_pin     = TIC33M_LCLK_PIN;
     
-    tic33m_init(tic33m_dev);
+    tic33m_init(&tic33m_dev);
     
-    tic33m_print(0, 3);
+    tic33m_display_number(&tic33m_dev, 0, 3);
     
     gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 }

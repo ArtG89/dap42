@@ -21,8 +21,6 @@
 #include <string.h>
 #include "tic33m.h"
 
-static tic33m dev;
-
 #define   TIC33M_MINUS   10
 #define   TIC33M_DEGREE  11
 #define   TIC33M_SPACE   12
@@ -53,26 +51,26 @@ static inline void tic33m_delay(void) {
     __asm("nop; nop; nop; nop; nop;");
 }
 
-static void tic33m_putchar(uint8_t digit, bool point) {
+static void tic33m_putchar(tic33m *dev, uint8_t digit, bool point) {
     uint8_t code = tic33m_digits[digit];
     if (point) {
         code |= 1;
     }
     
-    for (uint8_t i = 8; i; i--) {
+    for (int i = 8; i; i--) {
         if (code & 128) {
-            gpio_set(dev.din_port, dev.din_pin);
+            gpio_set(dev->din_port, dev->din_pin);
         } else {
-            gpio_clear(dev.din_port, dev.din_pin);
+            gpio_clear(dev->din_port, dev->din_pin);
         }
-        gpio_set(dev.clk_port, dev.clk_pin);
+        gpio_set(dev->clk_port, dev->clk_pin);
         tic33m_delay();
-        gpio_clear(dev.clk_port, dev.clk_pin);
+        gpio_clear(dev->clk_port, dev->clk_pin);
         code <<= 1;
     }
 }
 
-int tic33m_print(int32_t num, uint8_t precision) {
+int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision) {
     /* 9 digits on TIC33M */
     uint8_t digits[9];
     
@@ -97,6 +95,12 @@ int tic33m_print(int32_t num, uint8_t precision) {
     
     bool point;
     for (int i = 0; i < 9; i++) {
+        if (i > (8 - precision)) {
+            if (digits[i] == TIC33M_SPACE) {
+                digits[i] = 0;
+            }
+        }
+        
         if (i == (8 - precision)) {
             point = true;
             if (digits[i] == TIC33M_SPACE) {
@@ -110,28 +114,74 @@ int tic33m_print(int32_t num, uint8_t precision) {
             digits[i] = TIC33M_MINUS;
         }
         
-        tic33m_putchar(digits[i], point);
+        tic33m_putchar(dev, digits[i], point);
     }
     
-    gpio_set(dev.load_port, dev.load_pin);
+    gpio_set(dev->load_port, dev->load_pin);
     tic33m_delay();
-    gpio_clear(dev.load_port, dev.load_pin);
+    gpio_clear(dev->load_port, dev->load_pin);
     
     return 0;
 }
 
-void tic33m_init(tic33m device) {
-    dev = device;
+int tic33m_display_time(tic33m *dev, uint32_t seconds) {
+    /* 9 digits on TIC33M */
+    uint8_t digits[9];
+    memset(digits, TIC33M_SPACE, 8);
     
-    gpio_set_output_options(dev.load_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev.load_pin);
-    gpio_mode_setup(dev.load_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev.load_pin);
-    gpio_clear(dev.load_port, dev.load_pin);
+    uint16_t hours = seconds/3600;
+    seconds = seconds % 3600;
+    uint8_t  minutes = seconds / 60;
+    seconds -= minutes*60;
+
+    digits[8] = seconds % 10;
+    digits[7] = seconds / 10;
+    digits[6] = TIC33M_MINUS;
     
-    gpio_set_output_options(dev.din_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev.din_pin);
-    gpio_mode_setup(dev.din_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev.din_pin);
-    gpio_clear(dev.din_port, dev.din_pin);
+    digits[5] = minutes%10;
+    digits[4] = minutes/10;
+    digits[3] = TIC33M_MINUS;
     
-    gpio_set_output_options(dev.clk_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev.clk_pin);
-    gpio_mode_setup(dev.clk_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev.clk_pin);
-    gpio_clear(dev.clk_port, dev.clk_pin);
+    if (hours < 10) {
+        digits[2] = hours;
+    } else if (hours < 100) {
+        digits[2] = hours % 10;
+        digits[1] = hours / 10;
+    } else {
+        digits[2] = hours % 10;
+        digits[1] = (hours / 10) % 10;
+        digits[1] = hours / 100;
+    }
+    
+    for (int i = 0; i < 9; i++) {
+        tic33m_putchar(dev, digits[i], false);
+    }
+    
+    gpio_set(dev->load_port, dev->load_pin);
+    tic33m_delay();
+    gpio_clear(dev->load_port, dev->load_pin);
+    
+    return 0;
+}
+
+void tic33m_lclk(tic33m *dev) {
+    gpio_toggle(dev->lclk_port, dev->lclk_pin);
+}
+
+void tic33m_init(tic33m *dev) {
+    gpio_set_output_options(dev->load_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev->load_pin);
+    gpio_mode_setup(dev->load_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev->load_pin);
+    gpio_clear(dev->load_port, dev->load_pin);
+    
+    gpio_set_output_options(dev->din_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev->din_pin);
+    gpio_mode_setup(dev->din_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev->din_pin);
+    gpio_clear(dev->din_port, dev->din_pin);
+    
+    gpio_set_output_options(dev->clk_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev->clk_pin);
+    gpio_mode_setup(dev->clk_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev->clk_pin);
+    gpio_clear(dev->clk_port, dev->clk_pin);
+    
+    gpio_set_output_options(dev->lclk_port, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, dev->lclk_pin);
+    gpio_mode_setup(dev->lclk_port, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, dev->lclk_pin);
+    gpio_clear(dev->lclk_port, dev->clk_pin);
 }
