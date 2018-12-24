@@ -94,9 +94,6 @@ static void adc_setup_common(void) {
 	adc_set_right_aligned(ADC1);
 	adc_disable_temperature_sensor();
     
-    /* ~5 us sampling time */
-	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
-
 	adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
 	adc_disable_analog_watchdog(ADC1);
 }
@@ -113,6 +110,9 @@ static void adc_measure_current(void) {
     
     /* No VREF needed */
     adc_disable_vrefint();
+    
+    /* 1 us sampling time */
+	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_013DOT5);
     
     /* Data processed by IRQ */
     adc_enable_eoc_interrupt(ADC1);
@@ -131,6 +131,9 @@ static void adc_measure_vdda(void) {
     adc_power_off(ADC1);
     
     adc_setup_common();
+    
+    /* ~5 us sampling time */
+	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
     
     /* ADC will be run once */
     adc_disable_external_trigger_regular(ADC1);
