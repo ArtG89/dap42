@@ -366,9 +366,9 @@ static void tim3_setup(void)
         TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
 
     /*
-     * Sets the prescaler to have the timer run at 2kHz -> IRQs at 1 kHz
+     * Sets the prescaler to have the timer run at 1kHz
      */
-    timer_set_prescaler(TIM3, (rcc_apb1_frequency / 2000));
+    timer_set_prescaler(TIM3, (rcc_apb1_frequency / 1000));
 
     /* Disable preload. */
     timer_disable_preload(TIM3);
