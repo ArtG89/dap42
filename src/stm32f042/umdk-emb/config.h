@@ -89,6 +89,10 @@
 #define TIC33M_LCLK_PORT        GPIOB
 #define TIC33M_LCLK_PIN         GPIO5
 
+#define BANNER_STR1             "[INF] UMDK-ENERGYMON Energy Consumption Logger"
+#define BANNER_STR2             "[INF] (c) 2019 Unwired Devices LLC - www.unwds.com"
+#define BANNER_STR3             "[VER] 1.01"
+
 /* Word size for usart_recv and usart_send */
 typedef uint8_t usart_word_t;
 
