@@ -409,7 +409,11 @@ void tim3_isr(void)
         
             if (target_release_reset == 0) {
                 /* Release reset */
+#if nRESET_GPIO_INVERT
+                gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
                 gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
                 vcdc_println("[INF] target reset");
                 console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
             }
@@ -429,7 +433,7 @@ void tim3_isr(void)
         
             if (target_release_boot == 0) {
                 /* Release boot */
-                gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN);
+                gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
                 vcdc_println("[INF] target bootloader activated");
             }
         }
@@ -458,11 +462,15 @@ void tim3_isr(void)
                 /* 1000 ms long press */
                 target_boot_state = !target_boot_state;
                 /* Reset target */
+#if nRESET_GPIO_INVERT
+                gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
                 gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
             
                 if (target_boot_state) {            
                     /* Boot from system memory */
-                    gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN);
+                    gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
                     target_release_boot = 500;
                 } else {
                     /* Enable green LED */
@@ -479,9 +487,13 @@ void tim3_isr(void)
                 /* Toggle power */
                 if (target_power_state) {
                     /* Reset target */
+#if nRESET_GPIO_INVERT
+                    gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
                     gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
                     /* Set boot from flash */
-                    gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN);
+                    gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
                     /* Reset accumulated energy */
                     energy_accumultated_uah = 0;
                     seconds_passed = 0;
