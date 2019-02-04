@@ -30,8 +30,21 @@ typedef struct {
     uint32_t lclk_pin;
 } tic33m;
 
+typedef enum {
+    TIC33M_SYMB_NONE = 0,
+    TIC33M_SYMB_MINUS = 10,
+    TIC33M_SYMB_DEGREE = 11,
+    TIC33M_SYMB_SPACE = 12,
+    TIC33M_SYMB_UNDERSCORE = 13,
+    TIC33M_SYMB_UPPERSCORE = 14,
+    TIC33M_SYMB_I = 15,
+    TIC33M_SYMB_U = 16,
+    TIC33M_SYMB_P = 17,
+    TIC33M_SYMB_C = 18,
+} tic33m_first_symbol_t;
+
 void tic33m_init(tic33m *dev);
-int  tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision);
+int  tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision, tic33m_first_symbol_t symb);
 int  tic33m_display_time(tic33m *dev, uint32_t seconds);
 void tic33m_lclk(tic33m *dev);
 

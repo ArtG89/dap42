@@ -21,24 +21,36 @@
 #include <string.h>
 #include "tic33m.h"
 
-#define   TIC33M_MINUS   10
-#define   TIC33M_DEGREE  11
-#define   TIC33M_SPACE   12
+#define   TIC33M_MINUS      10
+#define   TIC33M_DEGREE     11
+#define   TIC33M_SPACE      12
+#define   TIC33M_UNDERSCORE 13
+#define   TIC33M_UPPERSCORE 14
+#define   TIC33M_I          15
+#define   TIC33M_U          16
+#define   TIC33M_P          17
+#define   TIC33M_C          18
 
 static const uint8_t tic33m_digits[]  = {
-                                          2+8+16+32+64+128,
-                                          2+8,
-                                          128+2+4+32+16,
-                                          2+8+128+4+16,
-                                          64+4+2+8,
-                                          128+64+4+8+16,
-                                          128+64+4+8+16+32,
-                                          128+2+8,
-                                          2+4+8+16+32+64+128,
-                                          2+4+8+16+64+128,
-                                          4,
-                                          2+4+64+128,
-                                          0
+                                          2+8+16+32+64+128,     /* 0 */
+                                          2+8,                  /* 1 */
+                                          128+2+4+32+16,        /* 2 */
+                                          2+8+128+4+16,         /* 3 */
+                                          64+4+2+8,             /* 4 */
+                                          128+64+4+8+16,        /* 5 */
+                                          128+64+4+8+16+32,     /* 6 */
+                                          128+2+8,              /* 7 */
+                                          2+4+8+16+32+64+128,   /* 8 */
+                                          2+4+8+16+64+128,      /* 9 */
+                                          4,                    /* minus */
+                                          2+4+64+128,           /* degree */
+                                          0,                    /* space */
+                                          128,                  /* upperscore */
+                                          2,                    /* underscore */
+                                          32+64,                /* left-aligned I */
+                                          2+8+16+32+64,         /* U */
+                                          2 + 4 + 32 + 64 + 128,/* P */
+                                          16 + 32 + 64 + 128,   /* C */
                                         };
 
 
@@ -70,13 +82,30 @@ static void tic33m_putchar(tic33m *dev, uint8_t digit, bool point) {
     }
 }
 
-int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision) {
+int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision, tic33m_first_symbol_t symb) {
     /* 9 digits on TIC33M */
     uint8_t digits[9];
     
     memset(digits, TIC33M_SPACE, 8);
     
-    if ((num > 999999999) || (num < -99999999) || (precision > 8)) {
+    if (num > 99999999) {
+        for (int i = 0; i < 9; i++) {
+            tic33m_putchar(dev, TIC33M_UPPERSCORE, false);
+        }
+        return -1;
+    }
+    
+    if (num < -9999999) {
+        for (int i = 0; i < 9; i++) {
+            tic33m_putchar(dev, TIC33M_UNDERSCORE, false);
+        }
+        return -1;
+    }
+    
+    if (precision > 7) {
+        for (int i = 0; i < 9; i++) {
+            tic33m_putchar(dev, TIC33M_SPACE, true);
+        }
         return -1;
     }
     
@@ -112,6 +141,10 @@ int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision) {
         
         if ((num < 0) && (digits[i] == TIC33M_SPACE) && (digits[i+1] != TIC33M_SPACE)) {
             digits[i] = TIC33M_MINUS;
+        }
+        
+        if ((i == 0) && (symb != TIC33M_SYMB_NONE)) {
+            digits[0] = symb;
         }
         
         tic33m_putchar(dev, digits[i], point);

@@ -57,6 +57,7 @@ void clock_setup(void) {
 static const uint16_t frequency = 1;
 static uint16_t button1_counter = 0;
 static uint16_t button2_counter = 0;
+static uint16_t button3_counter = 0;
 static uint16_t target_release_reset = 0;
 static uint16_t target_release_boot = 0;
 /* static uint16_t target_enable_power = 0; */
@@ -74,19 +75,25 @@ static volatile uint32_t adc_count_r1 = 0;
 static volatile uint32_t adc_count_r2 = 0;
 static volatile uint32_t adc_count_r3 = 0;
 
+static volatile uint32_t load_voltage_adc = 0;
+static bool display_counter = false;
+static uint32_t display_mode = 0;
 static uint32_t vdda = 0;
 static uint32_t current_report_counter = 0;
 static uint8_t  current_power_range = 0;
 static bool is_interface_connected = false;
 static uint64_t energy_accumultated_uah = 0;
+static uint64_t energy_accumultated_uwh = 0;
+static uint32_t current_max_ua = 0;
 static uint32_t seconds_passed = 0;
+static bool update_display = false;
 
 static void disable_power(void) {
     /* Stop ADC */
     adc_power_off(ADC1);
     
     /* Disable output power */
-    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+    gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     /* Disable green LED */
     gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 
@@ -137,16 +144,12 @@ static void adc_measure_current(void) {
     /* Data processed by IRQ */
     adc_enable_eoc_interrupt(ADC1);
     
-    /* PB0 channel only */
-    uint8_t adc_channels = 8;
-    adc_set_regular_sequence(ADC1, 1, &adc_channels);
+    /* PB0 and PB1 channels */
+    uint8_t adc_channels[2] = {8, 9};
+    adc_set_regular_sequence(ADC1, 2, adc_channels);
     
-    /* Enable analog watchdog for current range switching */
-    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
-    
-    /* Set watchdog thresholds */
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(3850);
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(25);
+    /* clear end-of-sequence flag */
+    ADC_ISR(ADC1) |= ADC_ISR_EOSEQ;
     
     adc_power_on(ADC1);
     
@@ -204,58 +207,66 @@ void adc_comp_isr(void)
 {
     uint16_t adc_sample = adc_read_regular(ADC1);
     
-    switch (current_power_range) {
-        case 3:
-            adc_result_r3 += adc_sample;
-            adc_count_r3++;
-            break;
-        case 2:
-            adc_result_r2 += adc_sample;
-            adc_count_r2++;
-            break;
-        case 1:
-            adc_result_r1 += adc_sample;
-            adc_count_r1++;
-            break;
-        default:
-            break;
-    }
-
-    if (adc_sample < 10) {
-        if (++current_underflow_ctr > 2) {        
-            current_underflow_ctr = 0;
-            if (current_power_range == 3) {
-                /* make-before-break! */
-                gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                current_power_range = 2;
-            }
-            else {
-                if (current_power_range == 2) {
-                    /* make-before-break! */
-                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                    gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    current_power_range = 1;
-                }
-            }
+    /* end of sequence means voltage measurements **/
+    if (adc_eos(ADC1)) {
+        /* clear end of sequence flag */
+        ADC_ISR(ADC1) |= ADC_ISR_EOSEQ;
+        load_voltage_adc += adc_sample;
+    } else {
+        switch (current_power_range) {
+            case 3:
+                adc_result_r3 += adc_sample;
+                adc_count_r3++;
+                break;
+            case 2:
+                adc_result_r2 += adc_sample;
+                adc_count_r2++;
+                break;
+            case 1:
+                adc_result_r1 += adc_sample;
+                adc_count_r1++;
+                break;
+            default:
+                break;
         }
-    }
-    
-    if (adc_sample > (4095-20)) {
-        if (++current_overflow_ctr > 2) {
-            current_overflow_ctr = 0;
-            if (current_power_range == 1) {
-                /* make-before-break! */
-                gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                current_power_range = 2;
-            } else {
-                if (current_power_range == 2) {
-                    /* make-before-break! */
-                    gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                    gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    current_power_range = 3;
+
+        if (adc_sample < CURRENT_LOWER_THRESHOLD) {
+            if (current_power_range != 1) {
+                if (++current_underflow_ctr > 3) {        
+                    current_underflow_ctr = 0;
+                    if (current_power_range == 3) {
+                        /* make-before-break! */
+                        gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                        gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                    }
+                    else { /* range 2 */
+                        /* make-before-break! */
+                        gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                        gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    }
+                    current_power_range--;
                 }
+            }
+        } else {        
+            if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
+                if (++current_overflow_ctr > 3) {
+                    current_overflow_ctr = 0;
+                    if (current_power_range == 1) {
+                        /* make-before-break! */
+                        gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                        gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    } else {
+                        if (current_power_range == 2) {
+                            /* make-before-break! */
+                            gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                            gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                        }
+                    }
+                    current_power_range++;
+                }
+            } else {
+                current_underflow_ctr = 0;
+                current_overflow_ctr = 0;
             }
         }
     }
@@ -266,6 +277,9 @@ void exti0_1_isr(void)
     exti_reset_request(CURRENT_OVERLOAD_IRQ);
 
     if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
+        /* discard any ongoing ADC conversion */
+        ADC_CR(ADC1) |= ADC_CR_ADSTP;
+        
         current_overflow_ctr = 0;
         current_underflow_ctr = 0;
         
@@ -287,10 +301,12 @@ void exti0_1_isr(void)
                 current_power_range = 3;
             }
         }
+        
+        /* restart ADC conversion */
+        while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
+        ADC_CR(ADC1) |= ADC_CR_ADSTART;
     }
 }
-
-volatile bool display_counter = false;
 
 #if defined(BANNER_STR1) || defined(BANNER_STR2) || defined(BANNER_STR3)
 bool banner_displayed = false;
@@ -329,25 +345,39 @@ void tim3_isr(void)
             /* 100 ms average */
             
             /* convert to mV then convert to uA */
-            /* NB: actual INA214 ratio differs from 100 V/V on current ranges 2 and 3 */
+            /* 1 uA = 10.1 mV on range 1 */
             uint32_t current_r1 = (vdda * (adc_result_r1/adc_count_r1)) / 4095;
             uint32_t current_r2 = (vdda * (adc_result_r2/adc_count_r2)) / 4095;
             uint32_t current_r3 = (vdda * (adc_result_r3/adc_count_r3)) / 4095;
             
             uint32_t current = 0;
             if (current_r1) {
-                current += (10*current_r1 + 50)/97;
+                current += (100 * current_r1) / 101;
             }
             if (current_r2) {
-                current += (1057*current_r2)/100 + 28;
+                current += 100 * ((100 * current_r2) / 101);
             }
             if (current_r3) {
-                current += (1053 * current_r3) + 4300;
+                current += 10000 * ((100 * current_r3) / 101);
             }
+            
+            if (current > current_max_ua) {
+                current_max_ua = current;
+            }
+            
+            /* divider is 11 */
+            uint32_t voltage = (11 * vdda * (load_voltage_adc/(adc_count_r1 + adc_count_r2 + adc_count_r3))) / 4095;
+            
+            itoa(voltage, cur_str, 10);
+            vcdc_print("[VOL] ");
+            vcdc_println(cur_str);
          
-            itoa(current, cur_str, 10);
             vcdc_print("[CUR] ");
 #if ENABLE_DEBUG
+            itoa(current/10, cur_str, 10);
+            vcdc_print(cur_str);
+            itoa(current % 10, cur_str, 10);
+            vcdc_print(".");
             vcdc_print(cur_str);
 
             itoa(current_r1, cur_str, 10);
@@ -363,11 +393,17 @@ void tim3_isr(void)
             vcdc_print(cur_str);
             vcdc_println(")");
 #else
+            itoa(current/10, cur_str, 10);
+            vcdc_print(cur_str);
+            
+            itoa(current % 10, cur_str, 10);
+            vcdc_print(".");
             vcdc_println(cur_str);
 #endif
             
             /* microamperes * 100ms */
             energy_accumultated_uah += current;
+            energy_accumultated_uwh += current * voltage / 1000;
             
             adc_result_r1 = 0;
             adc_count_r1 = 0;
@@ -377,27 +413,44 @@ void tim3_isr(void)
             
             adc_result_r3 = 0;
             adc_count_r3 = 0;
+            
+            load_voltage_adc = 0;
         }
     }
     
     /* every 2 seconds */
-    if (current_report_counter == 2000) {
+    if ((current_report_counter == 2000) || update_display) {
         if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
             seconds_passed += 2;
         }
         
-        if (display_counter) {
-            /* display current */
-            /* convert from uA*100ms to uA*h */
-            tic33m_display_number(&tic33m_dev, energy_accumultated_uah/36000, 3);
+        if (display_counter || update_display) {
+            switch (display_mode) {
+                case 1:
+                    /* maximum current  */
+                    tic33m_display_number(&tic33m_dev, current_max_ua/10, 0, TIC33M_SYMB_I);
+                    break;
+                case 2:
+                    /* convert from 10*uW*100ms to uW*h */
+                    tic33m_display_number(&tic33m_dev, energy_accumultated_uwh/360000, 3, TIC33M_SYMB_P);
+                    break;
+                default:
+                    /* convert from 10*uA*100ms to uA*h */
+                    tic33m_display_number(&tic33m_dev, energy_accumultated_uah/360000, 3, TIC33M_SYMB_C);
+                    break;
+            }
+            display_counter = false;
         } else {
             /* display time */
             tic33m_display_time(&tic33m_dev, seconds_passed);
+            display_counter = true;
         }
         
-        display_counter = !display_counter;
+        if (current_report_counter == 2000) {
+            current_report_counter = 0;
+        }
         
-        current_report_counter = 0;
+        update_display = false;
     }
     
     if (timer_get_flag(TIM3, TIM_SR_CC1IF)) {
@@ -459,6 +512,20 @@ void tim3_isr(void)
             }
             button2_counter = 0;
         }
+        
+        /* Check if DISPLAY MODE button is pressed */
+        if (gpio_get(DISPLAY_MODE_BTN_PORT, DISPLAY_MODE_BTN_PIN) == 0) {
+            button3_counter++;
+        } else {
+            /* button released */
+            if (button3_counter >= 100) {
+                if (++display_mode == 3) {
+                    display_mode = 0;
+                }
+                update_display = true;
+            }
+            button3_counter = 0;
+        } 
     
         /* Check if POWER button is pressed */
         if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) != 0) {
@@ -503,12 +570,13 @@ void tim3_isr(void)
                     energy_accumultated_uah = 0;
                     seconds_passed = 0;
                     /* Enable DC/DC power */
-                    gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+                    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
                     /* Enable current shunt (range 3 by default) */
                     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
                     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
                     gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
                     current_power_range = 3;
+                    current_max_ua = 0;
                     
                     /* enable green LED */
                     gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
@@ -595,6 +663,7 @@ static void button_setup(void) {
     /* Set BOOT0 pin to an input */
     gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
     gpio_mode_setup(TARGET_IFACE_BTN_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, TARGET_IFACE_BTN_PIN);
+    gpio_mode_setup(DISPLAY_MODE_BTN_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, DISPLAY_MODE_BTN_PIN);
 }
 
 #define FLASH_OBP_RDP 0x1FFFF800
@@ -633,11 +702,11 @@ void gpio_setup(void) {
     gpio_mode_setup(TARGET_IFACE_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TARGET_IFACE_EN_PIN);
 
     /* Output power enable pin */
-    gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, POWER_OUTPUT_EN_PIN);
+    gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, POWER_OUTPUT_EN_PIN);
     gpio_mode_setup(POWER_OUTPUT_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, POWER_OUTPUT_EN_PIN);
     
     /* Disable output power */
-    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+    gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     
     /* Configure current overload IRQ */
     rcc_peripheral_enable_clock(&RCC_APB2ENR, RCC_APB2ENR_SYSCFGCOMPEN);
@@ -683,7 +752,7 @@ void gpio_setup(void) {
     
     tic33m_init(&tic33m_dev);
     
-    tic33m_display_number(&tic33m_dev, 0, 3);
+    tic33m_display_number(&tic33m_dev, 0, 3, TIC33M_SYMB_NONE);
     
     gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 }
