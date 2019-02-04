@@ -700,6 +700,9 @@ void gpio_setup(void) {
     /* Target interface enable pin */
     gpio_set_output_options(TARGET_IFACE_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TARGET_IFACE_EN_PIN);
     gpio_mode_setup(TARGET_IFACE_EN_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TARGET_IFACE_EN_PIN);
+    /* Enable interface by default */
+    gpio_set(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
+    is_interface_connected = true;
 
     /* Output power enable pin */
     gpio_set_output_options(POWER_OUTPUT_EN_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, POWER_OUTPUT_EN_PIN);
