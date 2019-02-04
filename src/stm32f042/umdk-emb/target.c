@@ -141,6 +141,13 @@ static void adc_measure_current(void) {
     uint8_t adc_channels = 8;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
+    /* Enable analog watchdog for current range switching */
+    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
+    
+    /* Set watchdog thresholds */
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(3850);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(25);
+    
     adc_power_on(ADC1);
     
     /* start ADC measurements */
@@ -196,7 +203,7 @@ volatile int current_underflow_ctr = 0;
 void adc_comp_isr(void)
 {
     uint16_t adc_sample = adc_read_regular(ADC1);
-
+    
     switch (current_power_range) {
         case 3:
             adc_result_r3 += adc_sample;
@@ -217,7 +224,6 @@ void adc_comp_isr(void)
     if (adc_sample < 10) {
         if (++current_underflow_ctr > 2) {        
             current_underflow_ctr = 0;
-            
             if (current_power_range == 3) {
                 /* make-before-break! */
                 gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
@@ -238,7 +244,6 @@ void adc_comp_isr(void)
     if (adc_sample > (4095-20)) {
         if (++current_overflow_ctr > 2) {
             current_overflow_ctr = 0;
-            
             if (current_power_range == 1) {
                 /* make-before-break! */
                 gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
@@ -456,7 +461,7 @@ void tim3_isr(void)
         }
     
         /* Check if POWER button is pressed */
-        if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
+        if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) != 0) {
             button1_counter++;
             if ((button1_counter == 1000) && target_power_state) {
                 /* 1000 ms long press */
@@ -589,7 +594,6 @@ static void tim3_setup(void)
 static void button_setup(void) {
     /* Set BOOT0 pin to an input */
     gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
-    
     gpio_mode_setup(TARGET_IFACE_BTN_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, TARGET_IFACE_BTN_PIN);
 }
 
@@ -605,24 +609,6 @@ void gpio_setup(void) {
     rcc_periph_clock_enable(RCC_GPIOF);
 
     button_setup();
-
-    /* disable BOOT0 pin if enabled */
-    if (FLASH_OBR & FLASH_OBR_BOOT_SEL) {
-        flash_unlock();    
-        flash_erase_option_bytes();
-    
-        /* reset BOOT_SEL bit to disable BOOT0 pin */
-        flash_program_option_bytes(FLASH_OBP_USR, FLASH_OBP_USR_KEY);
-        /* restore default RDP value */
-        flash_program_option_bytes(FLASH_OBP_RDP, FLASH_OBP_RDP_KEY);
-    
-        flash_lock();
-    }
-
-    /* jump to STM DFU bootloader if button is pressed */
-    if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) == 0) {
-        DFU_reset_and_jump_to_bootloader();
-    }
 
     /* Setup LEDs as open-drain outputs */
     gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_CON_GPIO_PIN);
