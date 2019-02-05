@@ -37,7 +37,7 @@
 #include "USB/vcdc.h"
 #include "tic33m.h"
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 
 #define FLASH_CONFIG_PAGE   31 /* last of 32 pages */
 #define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
@@ -85,8 +85,9 @@ static volatile uint32_t adc_result_r3 = 0;
 static volatile uint32_t adc_count_r1 = 0;
 static volatile uint32_t adc_count_r2 = 0;
 static volatile uint32_t adc_count_r3 = 0;
+static volatile uint32_t adc_voltage_count = 0;
 
-static volatile uint32_t load_voltage_adc = 0;
+static volatile uint32_t adc_voltage_raw = 0;
 static bool display_counter = false;
 static uint32_t display_mode = 0;
 static uint32_t vdda = 0;
@@ -156,8 +157,8 @@ static void adc_measure_current(void) {
     adc_enable_eoc_interrupt(ADC1);
     
     /* PB0 and PB1 channels */
-    uint8_t adc_channels[2] = {8, 9};
-    adc_set_regular_sequence(ADC1, 2, adc_channels);
+    uint8_t adc_channels = 8;
+    adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
     /* clear end-of-sequence flag */
     ADC_ISR(ADC1) |= ADC_ISR_EOSEQ;
@@ -211,112 +212,38 @@ static void adc_measure_vdda(void) {
     adc_power_off(ADC1);
 }
 
-volatile int current_overflow_ctr = 0;
-volatile int current_underflow_ctr = 0;
-
-void adc_comp_isr(void)
-{
-    uint16_t adc_sample = adc_read_regular(ADC1);
+static uint32_t adc_measure_voltage(void) {
+    adc_power_off(ADC1);
     
-    /* end of sequence means voltage measurements **/
-    if (adc_eos(ADC1)) {
-        /* clear end of sequence flag */
-        ADC_ISR(ADC1) |= ADC_ISR_EOSEQ;
-        load_voltage_adc += adc_sample;
-    } else {
-        switch (current_power_range) {
-            case 3:
-                adc_result_r3 += adc_sample;
-                adc_count_r3++;
-                break;
-            case 2:
-                adc_result_r2 += adc_sample;
-                adc_count_r2++;
-                break;
-            case 1:
-                adc_result_r1 += adc_sample;
-                adc_count_r1++;
-                break;
-            default:
-                break;
-        }
+    /* ADC will be run once */
+    adc_disable_external_trigger_regular(ADC1);
 
-        if (adc_sample < CURRENT_LOWER_THRESHOLD) {
-            if (current_power_range != 1) {
-                if (++current_underflow_ctr > CURRENT_THRESHOLD_PERIOD) {        
-                    current_underflow_ctr = 0;
-                    if (current_power_range == 3) {
-                        /* make-before-break! */
-                        gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                        gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                    }
-                    else { /* range 2 */
-                        /* make-before-break! */
-                        gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                        gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    }
-                    current_power_range--;
-                }
-            }
-        } else {        
-            if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
-                if (++current_overflow_ctr > CURRENT_THRESHOLD_PERIOD) {
-                    current_overflow_ctr = 0;
-                    if (current_power_range == 1) {
-                        /* make-before-break! */
-                        gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                        gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                    } else {
-                        if (current_power_range == 2) {
-                            /* make-before-break! */
-                            gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                            gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                        }
-                    }
-                    current_power_range++;
-                }
-            } else {
-                current_underflow_ctr = 0;
-                current_overflow_ctr = 0;
-            }
-        }
+    /* Disable IRQ */
+    adc_disable_eoc_interrupt(ADC1);
+    
+    /* VREF channel only */
+    uint8_t adc_channels = 9;
+    adc_set_regular_sequence(ADC1, 1, &adc_channels);
+    
+    adc_power_on(ADC1);
+    
+    /* discard old data if present */
+    uint32_t adc_read = adc_read_regular(ADC1);
+    
+    adc_read = 0;
+    
+    /* start ADC and wait for it to finish */
+    for (int i = 0; i < 5; i++) {
+        adc_start_conversion_regular(ADC1);
+        while (!(adc_eoc(ADC1)));
+        adc_read += adc_read_regular(ADC1);
     }
-}
 
-void exti0_1_isr(void)
-{
-    exti_reset_request(CURRENT_OVERLOAD_IRQ);
+    uint32_t voltage = (emb_settings.voltage_coeff * vdda * adc_read) / (4095*10*5);
 
-    if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
-        /* discard any ongoing ADC conversion */
-        ADC_CR(ADC1) |= ADC_CR_ADSTP;
-        
-        current_overflow_ctr = 0;
-        current_underflow_ctr = 0;
-        
-        if (current_power_range == 1) {
-            gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-            current_power_range = 2;
-            
-            if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
-                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                current_power_range = 3;
-            }
-            
-            gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-        } else {
-            if (current_power_range == 2) {
-                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                current_power_range = 3;
-            }
-        }
-        
-        /* restart ADC conversion */
-        while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
-        ADC_CR(ADC1) |= ADC_CR_ADSTART;
-    }
+    adc_power_off(ADC1);
+    
+    return voltage;
 }
 
 static void calibrate_voltage(uint32_t cal_value) {
@@ -360,6 +287,108 @@ static void calibrate_voltage(uint32_t cal_value) {
     flash_program_word(FLASH_CONFIG_ADDR, FLASH_CONFIG_MAGIC);
     flash_program_word(FLASH_CONFIG_ADDR + 4, emb_settings.voltage_coeff);
     flash_lock();
+}
+
+
+volatile int current_overflow_ctr = 0;
+volatile int current_underflow_ctr = 0;
+
+void adc_comp_isr(void)
+{
+    uint16_t adc_sample = adc_read_regular(ADC1);
+    
+    switch (current_power_range) {
+        case 3:
+            adc_result_r3 += adc_sample;
+            adc_count_r3++;
+            break;
+        case 2:
+            adc_result_r2 += adc_sample;
+            adc_count_r2++;
+            break;
+        case 1:
+            adc_result_r1 += adc_sample;
+            adc_count_r1++;
+            break;
+        default:
+            break;
+    }
+
+    if (adc_sample < CURRENT_LOWER_THRESHOLD) {
+        if (current_power_range != 1) {
+            if (++current_underflow_ctr > CURRENT_THRESHOLD_PERIOD) {        
+                current_underflow_ctr = 0;
+                if (current_power_range == 3) {
+                    /* make-before-break! */
+                    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                }
+                else { /* range 2 */
+                    /* make-before-break! */
+                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                }
+                current_power_range--;
+            }
+        }
+    } else {        
+        if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
+            if (++current_overflow_ctr > CURRENT_THRESHOLD_PERIOD) {
+                current_overflow_ctr = 0;
+                if (current_power_range == 1) {
+                    /* make-before-break! */
+                    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                } else {
+                    if (current_power_range == 2) {
+                        /* make-before-break! */
+                        gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                        gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    }
+                }
+                current_power_range++;
+            }
+        } else {
+            current_underflow_ctr = 0;
+            current_overflow_ctr = 0;
+        }
+    }
+}
+
+void exti0_1_isr(void)
+{
+    exti_reset_request(CURRENT_OVERLOAD_IRQ);
+
+    if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
+        /* discard any ongoing ADC conversion */
+        ADC_CR(ADC1) |= ADC_CR_ADSTP;
+        
+        current_overflow_ctr = 0;
+        current_underflow_ctr = 0;
+        
+        if (current_power_range == 1) {
+            gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+            current_power_range = 2;
+            
+            if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
+                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                current_power_range = 3;
+            }
+            
+            gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+        } else {
+            if (current_power_range == 2) {
+                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
+                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                current_power_range = 3;
+            }
+        }
+        
+        /* restart ADC conversion */
+        while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
+        ADC_CR(ADC1) |= ADC_CR_ADSTART;
+    }
 }
 
 bool banner_displayed = false;
@@ -410,35 +439,52 @@ void tim3_isr(void)
         }
 
         /* calculate average ADC value */
-        if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
+        if (target_power_state) {
             char cur_str[10] = { 0 };
-            /* 100 ms average */
             
+            /* measure voltage */
+            ADC_CR(ADC1) |= ADC_CR_ADSTP;
+            while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
+            
+            uint32_t voltage = adc_measure_voltage();
+
             /* convert to mV then convert to uA */
             /* 1 uA = 10.1 mV on range 1 */
-            uint32_t current_r1 = (vdda * (adc_result_r1/adc_count_r1)) / 4095;
-            uint32_t current_r2 = (vdda * (adc_result_r2/adc_count_r2)) / 4095;
-            uint32_t current_r3 = (vdda * (adc_result_r3/adc_count_r3)) / 4095;
+            uint32_t adc_r1 = adc_result_r1;
+            uint32_t adc_r2 = adc_result_r2;
+            uint32_t adc_r3 = adc_result_r3;
+            uint32_t adc_c1 = adc_count_r1;
+            uint32_t adc_c2 = adc_count_r2;
+            uint32_t adc_c3 = adc_count_r3;
+            
+            adc_result_r1 = 0;
+            adc_count_r1 = 0;
+            adc_result_r2 = 0;
+            adc_count_r2 = 0;
+            adc_result_r3 = 0;
+            adc_count_r3 = 0;
+            
+            adc_measure_current();
+            
+            uint32_t current_r1 = (vdda * ((10*adc_r1)/adc_c1)) / 4095;
+            uint32_t current_r2 = (vdda * ((10*adc_r2)/adc_c2)) / 4095;
+            uint32_t current_r3 = (vdda * ((10*adc_r3)/adc_c3)) / 4095;
             
             uint32_t current = 0;
             if (current_r1) {
-                current += (100 * current_r1) / 101;
+                current += (10 * current_r1) / 102;
             }
             if (current_r2) {
-                current += 100 * ((100 * current_r2) / 101);
+                current += 10 * ((100 * current_r2) / 102);
             }
             if (current_r3) {
-                current += 10000 * ((100 * current_r3) / 101);
+                current += 1000 * ((100 * current_r3) / 102);
             }
             
             if (current > current_max_ua) {
                 current_max_ua = current;
             }
-            
-            /* convert to actual millivolts */
-            uint32_t voltage = (emb_settings.voltage_coeff * vdda *
-                                (load_voltage_adc/(adc_count_r1 + adc_count_r2 + adc_count_r3))) / 40950;
-            
+
             itoa(voltage, cur_str, 10);
             vcdc_print("[VOL] ");
             vcdc_println(cur_str);
@@ -451,15 +497,15 @@ void tim3_isr(void)
             vcdc_print(".");
             vcdc_print(cur_str);
 
-            itoa(adc_result_r1/adc_count_r1, cur_str, 10);
+            itoa(current_r1, cur_str, 10);
             vcdc_print(" (");
             vcdc_print(cur_str);
             
-            itoa(adc_result_r2/adc_count_r2, cur_str, 10);
+            itoa(current_r2, cur_str, 10);
             vcdc_print(" - ");
             vcdc_print(cur_str);
             
-            itoa(adc_result_r3/adc_count_r3, cur_str, 10);
+            itoa(current_r3, cur_str, 10);
             vcdc_print(" - ");
             vcdc_print(cur_str);
             vcdc_println(")");
@@ -475,23 +521,12 @@ void tim3_isr(void)
             /* microamperes * 100ms */
             energy_accumultated_uah += current;
             energy_accumultated_uwh += current * voltage / 1000;
-            
-            adc_result_r1 = 0;
-            adc_count_r1 = 0;
-            
-            adc_result_r2 = 0;
-            adc_count_r2 = 0;
-            
-            adc_result_r3 = 0;
-            adc_count_r3 = 0;
-            
-            load_voltage_adc = 0;
         }
     }
     
     /* every 2 seconds */
     if ((current_report_counter == 2000) || update_display) {
-        if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
+        if (target_power_state) {
             seconds_passed += 2;
         }
         
