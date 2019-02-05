@@ -26,6 +26,8 @@
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/exti.h>
 
+#include <string.h>
+
 #include "tick.h"
 #include "target.h"
 #include "config.h"
@@ -37,7 +39,16 @@
 
 #define ENABLE_DEBUG    (1)
 
+#define FLASH_CONFIG_PAGE   31 /* last of 32 pages */
+#define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
+#define FLASH_CONFIG_MAGIC  0xDEADF00D
+
 static tic33m tic33m_dev;
+
+static struct {
+    uint32_t magic;
+    uint32_t voltage_coeff;
+} emb_settings;
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
@@ -232,7 +243,7 @@ void adc_comp_isr(void)
 
         if (adc_sample < CURRENT_LOWER_THRESHOLD) {
             if (current_power_range != 1) {
-                if (++current_underflow_ctr > 3) {        
+                if (++current_underflow_ctr > CURRENT_THRESHOLD_PERIOD) {        
                     current_underflow_ctr = 0;
                     if (current_power_range == 3) {
                         /* make-before-break! */
@@ -249,7 +260,7 @@ void adc_comp_isr(void)
             }
         } else {        
             if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
-                if (++current_overflow_ctr > 3) {
+                if (++current_overflow_ctr > CURRENT_THRESHOLD_PERIOD) {
                     current_overflow_ctr = 0;
                     if (current_power_range == 1) {
                         /* make-before-break! */
@@ -308,9 +319,52 @@ void exti0_1_isr(void)
     }
 }
 
-#if defined(BANNER_STR1) || defined(BANNER_STR2) || defined(BANNER_STR3)
+static void calibrate_voltage(uint32_t cal_value) {
+    adc_measure_vdda();
+    
+    /* PB1 channel only */
+    uint8_t adc_channels = 9;
+    adc_set_regular_sequence(ADC1, 1, &adc_channels);
+    
+    adc_power_on(ADC1);
+    
+    uint32_t voltage_mv = 0;
+    
+    for (int i = 0; i < 10; i++) {
+        /* start ADC and wait for it to finish */
+        adc_start_conversion_regular(ADC1);
+        while (!(adc_eoc(ADC1)));
+
+        voltage_mv += adc_read_regular(ADC1);
+        
+        /* 100 us delay between measurements */
+        volatile uint32_t k = 4800;
+        do {
+            k--;
+        } while (k);
+    }
+    voltage_mv = (vdda * voltage_mv) / 4095;
+    
+    /* coeff is x10 for better accuracy */
+    emb_settings.voltage_coeff = (100 * cal_value)/voltage_mv;
+    
+    char coeff_str[5];
+    itoa(emb_settings.voltage_coeff, coeff_str, 10);
+    vcdc_print("[CAL] ");
+    vcdc_println(coeff_str);
+    
+    adc_power_off(ADC1);
+    
+    flash_unlock();
+    flash_erase_page(FLASH_CONFIG_ADDR);
+    flash_program_word(FLASH_CONFIG_ADDR, FLASH_CONFIG_MAGIC);
+    flash_program_word(FLASH_CONFIG_ADDR + 4, emb_settings.voltage_coeff);
+    flash_lock();
+}
+
 bool banner_displayed = false;
-#endif
+
+uint16_t do_calibrate = 0;
 
 /* ticks every 1 ms */
 void tim3_isr(void)
@@ -322,23 +376,39 @@ void tim3_isr(void)
         tic33m_lclk(&tic33m_dev);
     }
     
+    if (do_calibrate) {
+        do_calibrate--;
+        
+        if (!do_calibrate) {
+            /* calibration at 3.0V */
+            calibrate_voltage(3000);
+            disable_power();
+        }
+    }
+    
     /* every 100 ms */
     if ((current_report_counter % 100) == 0) {
-        #if defined(BANNER_STR1) || defined(BANNER_STR2) || defined(BANNER_STR3)
+        
+        /* only once */
         if (!banner_displayed) {
             #if defined(BANNER_STR1)
                 vcdc_println(BANNER_STR1);
             #endif
-            #if defined(BANNER_STR1)
+            #if defined(BANNER_STR2)
                 vcdc_println(BANNER_STR2);
             #endif
-            #if defined(BANNER_STR1)
+            #if defined(BANNER_STR3)
                 vcdc_println(BANNER_STR3);
             #endif
             banner_displayed = true;
+            
+            if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
+                vcdc_println("Configuration NOT loaded");
+            } else {
+                vcdc_println("Configuration loaded");
+            }
         }
-        #endif
-        
+
         /* calculate average ADC value */
         if (ADC_CR(ADC1) & ADC_CR_ADSTART) {
             char cur_str[10] = { 0 };
@@ -365,8 +435,9 @@ void tim3_isr(void)
                 current_max_ua = current;
             }
             
-            /* divider is 11 */
-            uint32_t voltage = (11 * vdda * (load_voltage_adc/(adc_count_r1 + adc_count_r2 + adc_count_r3))) / 4095;
+            /* convert to actual millivolts */
+            uint32_t voltage = (emb_settings.voltage_coeff * vdda *
+                                (load_voltage_adc/(adc_count_r1 + adc_count_r2 + adc_count_r3))) / 40950;
             
             itoa(voltage, cur_str, 10);
             vcdc_print("[VOL] ");
@@ -380,15 +451,15 @@ void tim3_isr(void)
             vcdc_print(".");
             vcdc_print(cur_str);
 
-            itoa(current_r1, cur_str, 10);
+            itoa(adc_result_r1/adc_count_r1, cur_str, 10);
             vcdc_print(" (");
             vcdc_print(cur_str);
             
-            itoa(current_r2, cur_str, 10);
+            itoa(adc_result_r2/adc_count_r2, cur_str, 10);
             vcdc_print(" - ");
             vcdc_print(cur_str);
             
-            itoa(current_r3, cur_str, 10);
+            itoa(adc_result_r3/adc_count_r3, cur_str, 10);
             vcdc_print(" - ");
             vcdc_print(cur_str);
             vcdc_println(")");
@@ -516,9 +587,29 @@ void tim3_isr(void)
         /* Check if DISPLAY MODE button is pressed */
         if (gpio_get(DISPLAY_MODE_BTN_PORT, DISPLAY_MODE_BTN_PIN) == 0) {
             button3_counter++;
+            
+            if (button3_counter > 5000) {
+                /* Enable DC/DC power */
+                gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+                /* delay before calibration 1500 ms */
+                do_calibrate = 1500;
+                uint8_t digits[9];
+                digits[0] = TIC33M_SYMB_C;
+                digits[1] = TIC33M_SYMB_A;
+                digits[2] = TIC33M_SYMB_L;
+                digits[3] = TIC33M_SYMB_SPACE;
+                digits[4] = 3;
+                digits[5] = 0;
+                digits[6] = 0;
+                digits[7] = 0;
+                digits[8] = TIC33M_SYMB_SPACE;
+                
+                tic33m_display_string(&tic33m_dev, digits);
+                current_report_counter = 1;
+            }
         } else {
             /* button released */
-            if (button3_counter >= 100) {
+            if ((button3_counter >= 100) && (button3_counter < 5000)) {
                 if (++display_mode == 3) {
                     display_mode = 0;
                 }
@@ -739,6 +830,11 @@ void gpio_setup(void) {
     /* Setup timers */
     tim2_setup();
     tim3_setup();
+    
+    memcpy((void *)&emb_settings, (void *)FLASH_CONFIG_ADDR, sizeof(emb_settings));
+    if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
+        emb_settings.voltage_coeff = 0;
+    }
     
     gpio_set_output_options(TIC33M_LCLK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TIC33M_LCLK_PIN);
     gpio_mode_setup(TIC33M_LCLK_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TIC33M_LCLK_PIN);

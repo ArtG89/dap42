@@ -95,10 +95,9 @@
 #define TIC33M_LCLK_PORT        GPIOB
 #define TIC33M_LCLK_PIN         GPIO5
 
-#define CURRENT_LOWER_THRESHOLD     25
-#define CURRENT_HIGHER_THRESHOLD    3850
+#define CURRENT_LOWER_THRESHOLD     20
+#define CURRENT_HIGHER_THRESHOLD    4000
 #define CURRENT_THRESHOLD_PERIOD    3
-
 
 #define BANNER_STR1             "[INF] UMDK-ENERGYMON Energy Consumption Logger"
 #define BANNER_STR2             "[INF] (c) 2019 Unwired Devices LLC - www.unwds.com"
