@@ -71,6 +71,10 @@ static void on_dfu_request(void) {
     do_reset_to_dfu = true;
 }
 
+__attribute__((weak)) void user_activity(void) {
+    /* do nothing */
+}
+
 int main(void) {
     if (DFU_AVAILABLE) {
         DFU_maybe_jump_to_bootloader();
@@ -173,6 +177,8 @@ int main(void) {
         } else {
             LED_ACTIVITY_OUT(0);
         }
+        
+        user_activity();
     }
 
     return 0;

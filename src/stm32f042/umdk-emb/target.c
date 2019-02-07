@@ -71,6 +71,7 @@ static uint16_t button2_counter = 0;
 static uint16_t button3_counter = 0;
 static uint16_t target_release_reset = 0;
 static uint16_t target_release_boot = 0;
+static uint16_t target_start_measurements = 0;
 /* static uint16_t target_enable_power = 0; */
 static bool target_power_state = false;
 static bool target_boot_state = false;
@@ -100,7 +101,28 @@ static uint32_t current_max_ua = 0;
 static uint32_t seconds_passed = 0;
 static bool update_display = false;
 
+static bool banner_displayed = false;
+static uint16_t do_calibrate = 0;
+
+static volatile struct {
+    uint32_t current_r1;
+    uint32_t current_r2;
+    uint32_t current_r3;
+    uint32_t voltage;
+} adc_data;
+
+typedef enum {
+    CMD_INT_CALIBRATE   = 1 << 0,
+    CMD_INT_CONSOLEOUT  = 1 << 1,
+    CMD_INT_LCDOUT      = 1 << 2,
+} internal_commands_t;
+
+volatile uint8_t cmd_int = 0;
+
 static void disable_power(void) {
+    /* Stop TIM2 */
+    timer_disable_counter(TIM2);
+    
     /* Stop ADC */
     adc_power_off(ADC1);
     
@@ -115,7 +137,6 @@ static void disable_power(void) {
     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
     gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-    current_power_range = 3;
     
     vcdc_println("[INF] power disabled");
 }
@@ -135,6 +156,9 @@ static void adc_setup_common(void) {
 
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
     adc_disable_analog_watchdog(ADC1);
+    
+    /* overwrite data in case of overrun */
+    ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
 }
 
 static void adc_measure_current(void) {
@@ -167,6 +191,9 @@ static void adc_measure_current(void) {
     
     /* start ADC measurements */
     adc_start_conversion_regular(ADC1);
+    
+    /* start TIM2 */
+    timer_enable_counter(TIM2);
 }
 
 static void adc_measure_vdda(void) {
@@ -315,6 +342,7 @@ void adc_comp_isr(void)
     }
 
     if (adc_sample < CURRENT_LOWER_THRESHOLD) {
+        timer_disable_counter(TIM2);
         if (current_power_range != 1) {
             if (++current_underflow_ctr > CURRENT_THRESHOLD_PERIOD) {        
                 current_underflow_ctr = 0;
@@ -331,8 +359,10 @@ void adc_comp_isr(void)
                 current_power_range--;
             }
         }
+        timer_enable_counter(TIM2);
     } else {        
         if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
+            timer_disable_counter(TIM2);
             if (++current_overflow_ctr > CURRENT_THRESHOLD_PERIOD) {
                 current_overflow_ctr = 0;
                 if (current_power_range == 1) {
@@ -348,6 +378,7 @@ void adc_comp_isr(void)
                 }
                 current_power_range++;
             }
+            timer_enable_counter(TIM2);
         } else {
             current_underflow_ctr = 0;
             current_overflow_ctr = 0;
@@ -360,6 +391,9 @@ void exti0_1_isr(void)
     exti_reset_request(CURRENT_OVERLOAD_IRQ);
 
     if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
+        /* stop TIM2 */
+        timer_disable_counter(TIM2);
+        
         /* discard any ongoing ADC conversion */
         ADC_CR(ADC1) |= ADC_CR_ADSTP;
         
@@ -388,12 +422,15 @@ void exti0_1_isr(void)
         /* restart ADC conversion */
         while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
         ADC_CR(ADC1) |= ADC_CR_ADSTART;
+        
+        /* clear ADC DR just in case */
+        uint16_t adcval = adc_read_regular(ADC1);
+        (void) adcval;
+        
+        /* restart TIM2 */
+        timer_enable_counter(TIM2);
     }
 }
-
-bool banner_displayed = false;
-
-uint16_t do_calibrate = 0;
 
 /* ticks every 1 ms */
 void tim3_isr(void)
@@ -410,8 +447,7 @@ void tim3_isr(void)
         
         if (!do_calibrate) {
             /* calibration at 3.0V */
-            calibrate_voltage(3000);
-            disable_power();
+            cmd_int |= CMD_INT_CALIBRATE;
         }
     }
     
@@ -439,14 +475,10 @@ void tim3_isr(void)
         }
 
         /* calculate average ADC value */
-        if (target_power_state) {
-            char cur_str[10] = { 0 };
-            
+        if (target_power_state && !target_start_measurements) {
             /* measure voltage */
-            ADC_CR(ADC1) |= ADC_CR_ADSTP;
-            while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
-            
-            uint32_t voltage = adc_measure_voltage();
+            timer_disable_counter(TIM2);
+            adc_data.voltage = adc_measure_voltage();
 
             /* convert to mV then convert to uA */
             /* 1 uA = 10.1 mV on range 1 */
@@ -466,61 +498,11 @@ void tim3_isr(void)
             
             adc_measure_current();
             
-            uint32_t current_r1 = (vdda * ((10*adc_r1)/adc_c1)) / 4095;
-            uint32_t current_r2 = (vdda * ((10*adc_r2)/adc_c2)) / 4095;
-            uint32_t current_r3 = (vdda * ((10*adc_r3)/adc_c3)) / 4095;
+            adc_data.current_r1 = (vdda * ((10*adc_r1)/adc_c1)) / 4095;
+            adc_data.current_r2 = (vdda * ((10*adc_r2)/adc_c2)) / 4095;
+            adc_data.current_r3 = (vdda * ((10*adc_r3)/adc_c3)) / 4095;
             
-            uint32_t current = 0;
-            if (current_r1) {
-                current += (10 * current_r1) / 102;
-            }
-            if (current_r2) {
-                current += 10 * ((100 * current_r2) / 102);
-            }
-            if (current_r3) {
-                current += 1000 * ((100 * current_r3) / 102);
-            }
-            
-            if (current > current_max_ua) {
-                current_max_ua = current;
-            }
-
-            itoa(voltage, cur_str, 10);
-            vcdc_print("[VOL] ");
-            vcdc_println(cur_str);
-         
-            vcdc_print("[CUR] ");
-#if ENABLE_DEBUG
-            itoa(current/10, cur_str, 10);
-            vcdc_print(cur_str);
-            itoa(current % 10, cur_str, 10);
-            vcdc_print(".");
-            vcdc_print(cur_str);
-
-            itoa(current_r1, cur_str, 10);
-            vcdc_print(" (");
-            vcdc_print(cur_str);
-            
-            itoa(current_r2, cur_str, 10);
-            vcdc_print(" - ");
-            vcdc_print(cur_str);
-            
-            itoa(current_r3, cur_str, 10);
-            vcdc_print(" - ");
-            vcdc_print(cur_str);
-            vcdc_println(")");
-#else
-            itoa(current/10, cur_str, 10);
-            vcdc_print(cur_str);
-            
-            itoa(current % 10, cur_str, 10);
-            vcdc_print(".");
-            vcdc_println(cur_str);
-#endif
-            
-            /* microamperes * 100ms */
-            energy_accumultated_uah += current;
-            energy_accumultated_uwh += current * voltage / 1000;
+            cmd_int |= CMD_INT_CONSOLEOUT;
         }
     }
     
@@ -530,33 +512,11 @@ void tim3_isr(void)
             seconds_passed += 2;
         }
         
-        if (display_counter || update_display) {
-            switch (display_mode) {
-                case 1:
-                    /* maximum current  */
-                    tic33m_display_number(&tic33m_dev, current_max_ua/10, 0, TIC33M_SYMB_I);
-                    break;
-                case 2:
-                    /* convert from 10*uW*100ms to uW*h */
-                    tic33m_display_number(&tic33m_dev, energy_accumultated_uwh/360000, 3, TIC33M_SYMB_P);
-                    break;
-                default:
-                    /* convert from 10*uA*100ms to uA*h */
-                    tic33m_display_number(&tic33m_dev, energy_accumultated_uah/360000, 3, TIC33M_SYMB_C);
-                    break;
-            }
-            display_counter = false;
-        } else {
-            /* display time */
-            tic33m_display_time(&tic33m_dev, seconds_passed);
-            display_counter = true;
-        }
-        
+        cmd_int |= CMD_INT_LCDOUT;
+
         if (current_report_counter == 2000) {
             current_report_counter = 0;
         }
-        
-        update_display = false;
     }
     
     if (timer_get_flag(TIM3, TIM_SR_CC1IF)) {
@@ -580,6 +540,15 @@ void tim3_isr(void)
 #endif
                 vcdc_println("[INF] target reset");
                 console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
+            }
+        }
+        
+        if (target_start_measurements) {
+            target_start_measurements--;
+            
+            if (target_start_measurements == 0) {
+                adc_measure_vdda();
+                adc_measure_current();
             }
         }
 
@@ -710,10 +679,10 @@ void tim3_isr(void)
                     target_boot_state = false;
                     target_power_failure = 0;
                     
-                    target_release_reset = 250;
-                    /* start current monitoring */
-                    adc_measure_vdda();
-                    adc_measure_current();
+                    target_release_reset = 100;
+                    
+                    /* start current monitoring in 100 ms */
+                    target_start_measurements = 100;
                     
                     vcdc_println("[INF] power enabled");
                 } else {
@@ -722,6 +691,97 @@ void tim3_isr(void)
             }
             button1_counter = 0;
         }
+    }
+}
+
+void user_activity(void) {
+    if (cmd_int & CMD_INT_CALIBRATE) {
+        cmd_int &= ~CMD_INT_CALIBRATE;
+        calibrate_voltage(3000);
+        disable_power();
+    }
+    
+    if (cmd_int & CMD_INT_CONSOLEOUT) {
+        cmd_int &= ~CMD_INT_CONSOLEOUT;
+
+        uint32_t current = 0;
+        if (adc_data.current_r1) {
+            current += (10 * adc_data.current_r1) / 102;
+        }
+        if (adc_data.current_r2) {
+            current += 10 * ((100 * adc_data.current_r2) / 102);
+        }
+        if (adc_data.current_r3) {
+            current += 1000 * ((100 * adc_data.current_r3) / 102);
+        }
+        
+        if (current > current_max_ua) {
+            current_max_ua = current;
+        }
+
+        char cur_str[10] = { 0 };
+        itoa(adc_data.voltage, cur_str, 10);
+        vcdc_print("[VOL] ");
+        vcdc_println(cur_str);
+     
+        vcdc_print("[CUR] ");
+#if ENABLE_DEBUG
+        itoa(current/10, cur_str, 10);
+        vcdc_print(cur_str);
+        itoa(current % 10, cur_str, 10);
+        vcdc_print(".");
+        vcdc_print(cur_str);
+
+        itoa(adc_data.current_r1, cur_str, 10);
+        vcdc_print(" (");
+        vcdc_print(cur_str);
+        
+        itoa(adc_data.current_r2, cur_str, 10);
+        vcdc_print(" - ");
+        vcdc_print(cur_str);
+        
+        itoa(adc_data.current_r3, cur_str, 10);
+        vcdc_print(" - ");
+        vcdc_print(cur_str);
+        vcdc_println(")");
+#else
+        itoa(current/10, cur_str, 10);
+        vcdc_print(cur_str);
+        
+        itoa(current % 10, cur_str, 10);
+        vcdc_print(".");
+        vcdc_println(cur_str);
+#endif
+        
+        /* microamperes * 100ms */
+        energy_accumultated_uah += current;
+        energy_accumultated_uwh += current * adc_data.voltage / 1000;
+    }
+
+    if (cmd_int & CMD_INT_LCDOUT) {
+        cmd_int &= ~CMD_INT_LCDOUT;
+        if (display_counter || update_display) {
+            switch (display_mode) {
+                case 1:
+                    /* maximum current  */
+                    tic33m_display_number(&tic33m_dev, current_max_ua/10, 0, TIC33M_SYMB_I);
+                    break;
+                case 2:
+                    /* convert from 10*uW*100ms to uW*h */
+                    tic33m_display_number(&tic33m_dev, energy_accumultated_uwh/360000, 3, TIC33M_SYMB_P);
+                    break;
+                default:
+                    /* convert from 10*uA*100ms to uA*h */
+                    tic33m_display_number(&tic33m_dev, energy_accumultated_uah/360000, 3, TIC33M_SYMB_C);
+                    break;
+            }
+            display_counter = false;
+        } else {
+            /* display time */
+            tic33m_display_time(&tic33m_dev, seconds_passed);
+            display_counter = true;
+        }
+        update_display = false;
     }
 }
 
@@ -738,7 +798,6 @@ static void tim2_setup(void)
     timer_set_clock_division(TIM2, 0x0);
     /* Generate TRGO on every update. */
     timer_set_master_mode(TIM2, TIM_CR2_MMS_UPDATE);
-    timer_enable_counter(TIM2);
 }
 
 /* starts button and data processing every 1 ms */
@@ -747,6 +806,9 @@ static void tim3_setup(void)
     /* Enable TIM3 clock. */
     rcc_periph_clock_enable(RCC_TIM3);
 
+    /* TIM3 is a low priority interrupt */
+    nvic_set_priority(NVIC_TIM3_IRQ, 128);
+    
     /* Enable TIM3 interrupt. */
     nvic_enable_irq(NVIC_TIM3_IRQ);
 
@@ -857,7 +919,7 @@ void gpio_setup(void) {
     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
     gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-    current_power_range = 3;
+    current_power_range = 0;
 
     /* Power on in 100 ms by TIM3 */
     /* button1_counter = 100; */
@@ -886,7 +948,26 @@ void gpio_setup(void) {
     
     tic33m_init(&tic33m_dev);
     
-    tic33m_display_number(&tic33m_dev, 0, 3, TIC33M_SYMB_NONE);
+    uint8_t digits[9];
+    if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
+        digits[0] = TIC33M_SYMB_E;
+        digits[1] = TIC33M_SYMB_R;
+        digits[2] = TIC33M_SYMB_R;
+    } else {
+        digits[0] = TIC33M_SYMB_C;
+        digits[1] = TIC33M_SYMB_A;
+        digits[2] = TIC33M_SYMB_L;
+    }
+    digits[3] = TIC33M_SYMB_SPACE;
+    digits[4] = TIC33M_SYMB_SPACE;
+    digits[5] = TIC33M_SYMB_SPACE;
+
+    /* Convert string to digits, point after first digit */
+    digits[6] = (FW_VERSION[0] - 0x30) | (1<<7);
+    digits[7] = (FW_VERSION[2] - 0x30);
+    digits[8] = (FW_VERSION[3] - 0x30);
+
+    tic33m_display_string(&tic33m_dev, digits);
     
     gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 }

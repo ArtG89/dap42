@@ -43,6 +43,8 @@ typedef enum {
     TIC33M_SYMB_C = 18,
     TIC33M_SYMB_A = 19,
     TIC33M_SYMB_L = 20,
+    TIC33M_SYMB_E = 21,
+    TIC33M_SYMB_R = 22,
 } tic33m_first_symbol_t;
 
 void tic33m_init(tic33m *dev);

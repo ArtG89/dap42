@@ -144,7 +144,7 @@ Provides definitions about:
 
 #define LED_ACT_GPIO_PORT       GPIOA
 #define LED_ACT_GPIO_PIN        GPIO13 /* PA13 */
-#define LED_ACT_DISABLED        0
+#define LED_ACT_DISABLED        1
 
 #define SWDIO_GPIO_PIN_NUM      5
 

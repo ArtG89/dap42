@@ -32,6 +32,8 @@
 #define   TIC33M_C          18
 #define   TIC33M_A          19
 #define   TIC33M_L          20
+#define   TIC33M_E          21
+#define   TIC33M_R          22
 
 static const uint8_t tic33m_digits[]  = {
                                           2+8+16+32+64+128,     /* 0 */
@@ -55,6 +57,8 @@ static const uint8_t tic33m_digits[]  = {
                                           16 + 32 + 64 + 128,   /* C */
                                           2+4+8+32+64+128,      /* A */
                                           16+32+64,             /* L */
+                                          4+16+32+64+128,       /* E */
+                                          4+32,                 /* r */
                                         };
 
 
@@ -203,7 +207,7 @@ int tic33m_display_time(tic33m *dev, uint32_t seconds) {
 
 int  tic33m_display_string(tic33m *dev, uint8_t *digits) {
     for (int i = 0; i < 9; i++) {
-        tic33m_putchar(dev, digits[i], false);
+        tic33m_putchar(dev, digits[i] & ~(1<<7), digits[i] >> 7);
     }
     
     gpio_set(dev->load_port, dev->load_pin);

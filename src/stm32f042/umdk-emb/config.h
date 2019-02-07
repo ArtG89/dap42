@@ -27,7 +27,7 @@
 #define CAN_NVIC_LINE NVIC_CEC_CAN_IRQ
 
 #define VCDC_AVAILABLE 1
-#define VCDC_TX_BUFFER_SIZE 256
+#define VCDC_TX_BUFFER_SIZE 512
 #define VCDC_RX_BUFFER_SIZE 256
 
 #define CDC_AVAILABLE 1
@@ -95,13 +95,15 @@
 #define TIC33M_LCLK_PORT        GPIOB
 #define TIC33M_LCLK_PIN         GPIO5
 
-#define CURRENT_LOWER_THRESHOLD     20
-#define CURRENT_HIGHER_THRESHOLD    4000
+#define CURRENT_LOWER_THRESHOLD     30
+#define CURRENT_HIGHER_THRESHOLD    3800
 #define CURRENT_THRESHOLD_PERIOD    3
+
+#define FW_VERSION              "1.02"
 
 #define BANNER_STR1             "[INF] UMDK-ENERGYMON Energy Consumption Logger"
 #define BANNER_STR2             "[INF] (c) 2019 Unwired Devices LLC - www.unwds.com"
-#define BANNER_STR3             "[VER] 1.01"
+#define BANNER_STR3             "[VER] " FW_VERSION
 
 /* Word size for usart_recv and usart_send */
 typedef uint8_t usart_word_t;
