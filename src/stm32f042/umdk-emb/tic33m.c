@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Unwired Devices LLC
+ * Copyright (c) 2019, Unwired Devices LLC  <info@unwds.com>
  *
  * Permission to use, copy, modify, and/or distribute this software
  * for any purpose with or without fee is hereby granted, provided
@@ -35,32 +35,66 @@
 #define   TIC33M_E          21
 #define   TIC33M_R          22
 
-static const uint8_t tic33m_digits[]  = {
-                                          2+8+16+32+64+128,     /* 0 */
-                                          2+8,                  /* 1 */
-                                          128+2+4+32+16,        /* 2 */
-                                          2+8+128+4+16,         /* 3 */
-                                          64+4+2+8,             /* 4 */
-                                          128+64+4+8+16,        /* 5 */
-                                          128+64+4+8+16+32,     /* 6 */
-                                          128+2+8,              /* 7 */
-                                          2+4+8+16+32+64+128,   /* 8 */
-                                          2+4+8+16+64+128,      /* 9 */
-                                          4,                    /* minus */
-                                          2+4+64+128,           /* degree */
-                                          0,                    /* space */
-                                          128,                  /* upperscore */
-                                          2,                    /* underscore */
-                                          32+64,                /* left-aligned I */
-                                          2+8+16+32+64,         /* U */
-                                          2 + 4 + 32 + 64 + 128,/* P */
-                                          16 + 32 + 64 + 128,   /* C */
-                                          2+4+8+32+64+128,      /* A */
-                                          16+32+64,             /* L */
-                                          4+16+32+64+128,       /* E */
-                                          4+32,                 /* r */
-                                        };
+typedef struct {
+    char symbol;
+    uint8_t code;
+} ascii_symbols_t;
 
+/* TIC33M symbol
+ *    128
+ *  64    2
+ *     4
+ *  32    8
+ *     16    1
+*/
+
+static const ascii_symbols_t tic33m_digits[]  = {
+    { ' ', 0 },
+    { '-', 4 },
+    { '_', 2 },
+    { '`', 128 },
+    { '0', 2+8+16+32+64+128 },
+    { '1', 2+8 },
+    { '2', 128+2+4+32+16 },
+    { '3', 2+8+128+4+16 },
+    { '4', 64+4+2+8 },
+    { '5', 128+64+4+8+16 },
+    { '6', 128+64+4+8+16+32 },
+    { '7', 128+2+8 },
+    { '8', 2+4+8+16+32+64+128 },
+    { '9', 2+4+8+16+64+128 },
+    { 'A', 2+4+8+32+64+128 },
+    { 'b', 4+8+16+32+64 },
+    { 'C', 16+32+64+128 },
+    { 'c', 4+16+32 },
+    { 'd', 2+4+8+16+32 },
+    { 'E', 4+16+32+64+128 },
+    { 'F', 4+32+64+128 },
+    { 'G', 8+16+32+64+128 },
+    { 'h', 4+8+32+64 },
+    { 'I', 32+64 },
+    { 'i', 8 },
+    { 'J', 2+8+16 },
+    /* K is impossible */
+    { 'L', 16+32+64 },
+    /* M is impossible */
+    { 'n', 4+8+32 },
+    { 'o', 4+8+16+32 },
+    { 'P', 2+4+32+64+128 },
+    /* Q is impossible */
+    { 'r', 4+32 },
+    { 'S', 4+8+16+64+128 },
+    { 't', 4+16+32+64 },
+    { 'U', 2+8+16+32+64 },
+    { 'u', 8+16+32 },
+    /* V is impossible */
+    /* W is impossible */
+    /* X is impossible */
+    { 'Y', 2+4+8+16+64 },
+    /* Z is impossible */
+};
+
+#define TIC33M_NUM_DIGITS   sizeof(tic33m_digits)/sizeof(ascii_symbols_t)
 
 static inline void tic33m_delay(void) {
     /* 0.4 us min strobe length */
@@ -71,8 +105,20 @@ static inline void tic33m_delay(void) {
     __asm("nop; nop; nop; nop; nop;");
 }
 
-static void tic33m_putchar(tic33m *dev, uint8_t digit, bool point) {
-    uint8_t code = tic33m_digits[digit];
+static int tic33m_find_code(char symbol) {
+    for (unsigned i = 0; i < TIC33M_NUM_DIGITS; i++) {
+        if (tic33m_digits[i].symbol == symbol) {
+            return tic33m_digits[i].code;
+        }
+    }
+    
+    /* 'space' if nothing found */
+    return tic33m_digits[0].code;
+}
+
+static void tic33m_putchar(tic33m *dev, char symbol, bool point) {
+    uint8_t code = tic33m_find_code(symbol);
+    
     if (point) {
         code |= 1;
     }
@@ -90,74 +136,31 @@ static void tic33m_putchar(tic33m *dev, uint8_t digit, bool point) {
     }
 }
 
-int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision, tic33m_first_symbol_t symb) {
-    /* 9 digits on TIC33M */
-    uint8_t digits[9];
-    
-    memset(digits, TIC33M_SPACE, 8);
-    
-    if (num > 99999999) {
-        for (int i = 0; i < 9; i++) {
-            tic33m_putchar(dev, TIC33M_UPPERSCORE, false);
-        }
-        return -1;
-    }
-    
-    if (num < -9999999) {
-        for (int i = 0; i < 9; i++) {
-            tic33m_putchar(dev, TIC33M_UNDERSCORE, false);
-        }
-        return -1;
-    }
-    
-    if (precision > 7) {
-        for (int i = 0; i < 9; i++) {
-            tic33m_putchar(dev, TIC33M_SPACE, true);
-        }
-        return -1;
-    }
-    
-    if (num == 0) {
-        for (int i = 0; i < (precision + 1); i++) {
-            digits[8-i] = 0;
-        }
-    } else {
-        int i = 8;
-        do {
-            digits[i] = num % 10;
-            num /= 10;
-            i--;
-        } while (num != 0);
-    }
-    
-    bool point;
-    for (int i = 0; i < 9; i++) {
-        if (i > (8 - precision)) {
-            if (digits[i] == TIC33M_SPACE) {
-                digits[i] = 0;
-            }
-        }
+int tic33m_display_string(tic33m *dev, char *str, int strlen) {
+    /* 9 symbols on TIC33M */
+    int strindex = 0;
+    int lcdindex = 0;
+    do {
+        bool point = false;
         
-        if (i == (8 - precision)) {
-            point = true;
-            if (digits[i] == TIC33M_SPACE) {
-                digits[i] = 0;
+        if (strindex < strlen) {
+            if ((strindex < strlen - 1) && (str[strindex + 1] == '.')) {
+                point = true;
             }
+            
+            if (str[strindex] != '.') {
+                lcdindex++;
+                tic33m_putchar(dev, str[strindex], point);
+            }
+            strindex++;
         } else {
-            point = false;
+            tic33m_putchar(dev, ' ', false);
+            lcdindex++;
         }
-        
-        if ((num < 0) && (digits[i] == TIC33M_SPACE) && (digits[i+1] != TIC33M_SPACE)) {
-            digits[i] = TIC33M_MINUS;
-        }
-        
-        if ((i == 0) && (symb != TIC33M_SYMB_NONE)) {
-            digits[0] = symb;
-        }
-        
-        tic33m_putchar(dev, digits[i], point);
-    }
+
+    } while (lcdindex < 9);
     
+    tic33m_delay();
     gpio_set(dev->load_port, dev->load_pin);
     tic33m_delay();
     gpio_clear(dev->load_port, dev->load_pin);
@@ -167,47 +170,36 @@ int tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision, tic33m_fi
 
 int tic33m_display_time(tic33m *dev, uint32_t seconds) {
     /* 9 digits on TIC33M */
-    uint8_t digits[9];
-    memset(digits, TIC33M_SPACE, 8);
+    char digits[9];
+    memset(digits, ' ', 8);
     
     uint16_t hours = seconds/3600;
     seconds = seconds % 3600;
     uint8_t  minutes = seconds / 60;
     seconds -= minutes*60;
 
-    digits[8] = seconds % 10;
-    digits[7] = seconds / 10;
-    digits[6] = TIC33M_MINUS;
+    /* convert to ASCII symbols */
+    digits[8] = '0' + seconds % 10;
+    digits[7] = '0' + seconds / 10;
+    digits[6] = '-';
     
-    digits[5] = minutes%10;
-    digits[4] = minutes/10;
-    digits[3] = TIC33M_MINUS;
+    digits[5] = '0' + minutes%10;
+    digits[4] = '0' + minutes/10;
+    digits[3] = '-';
     
     if (hours < 10) {
-        digits[2] = hours;
+        digits[2] = '0' + hours;
     } else if (hours < 100) {
-        digits[2] = hours % 10;
-        digits[1] = hours / 10;
+        digits[2] = '0' + hours % 10;
+        digits[1] = '0' + hours / 10;
     } else {
-        digits[2] = hours % 10;
-        digits[1] = (hours / 10) % 10;
-        digits[1] = hours / 100;
+        digits[2] = '0' + hours % 10;
+        digits[1] = '0' + (hours / 10) % 10;
+        digits[1] = '0' + hours / 100;
     }
     
     for (int i = 0; i < 9; i++) {
         tic33m_putchar(dev, digits[i], false);
-    }
-    
-    gpio_set(dev->load_port, dev->load_pin);
-    tic33m_delay();
-    gpio_clear(dev->load_port, dev->load_pin);
-    
-    return 0;
-}
-
-int  tic33m_display_string(tic33m *dev, uint8_t *digits) {
-    for (int i = 0; i < 9; i++) {
-        tic33m_putchar(dev, digits[i] & ~(1<<7), digits[i] >> 7);
     }
     
     gpio_set(dev->load_port, dev->load_pin);

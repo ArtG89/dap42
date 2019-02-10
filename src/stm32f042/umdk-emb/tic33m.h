@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, Unwired Devices LLC
+ * Copyright (c) 2019, Unwired Devices LLC <info@unwds.com>
  *
  * Permission to use, copy, modify, and/or distribute this software
  * for any purpose with or without fee is hereby granted, provided
@@ -30,27 +30,9 @@ typedef struct {
     uint32_t lclk_pin;
 } tic33m;
 
-typedef enum {
-    TIC33M_SYMB_NONE = 0,
-    TIC33M_SYMB_MINUS = 10,
-    TIC33M_SYMB_DEGREE = 11,
-    TIC33M_SYMB_SPACE = 12,
-    TIC33M_SYMB_UNDERSCORE = 13,
-    TIC33M_SYMB_UPPERSCORE = 14,
-    TIC33M_SYMB_I = 15,
-    TIC33M_SYMB_U = 16,
-    TIC33M_SYMB_P = 17,
-    TIC33M_SYMB_C = 18,
-    TIC33M_SYMB_A = 19,
-    TIC33M_SYMB_L = 20,
-    TIC33M_SYMB_E = 21,
-    TIC33M_SYMB_R = 22,
-} tic33m_first_symbol_t;
-
 void tic33m_init(tic33m *dev);
-int  tic33m_display_number(tic33m *dev, int32_t num, uint8_t precision, tic33m_first_symbol_t symb);
 int  tic33m_display_time(tic33m *dev, uint32_t seconds);
-int  tic33m_display_string(tic33m *dev, uint8_t *digits);
+int  tic33m_display_string(tic33m *dev, char *str, int strlen);
 void tic33m_lclk(tic33m *dev);
 
 #endif /* TIC33M_H_INCLUDED */

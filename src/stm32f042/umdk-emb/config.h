@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016, Devan Lai
+ * Copyright (c) 2019, Unwired Devices LLC <info@unwds.com>
  *
  * Permission to use, copy, modify, and/or distribute this software
  * for any purpose with or without fee is hereby granted, provided
@@ -27,14 +28,14 @@
 #define CAN_NVIC_LINE NVIC_CEC_CAN_IRQ
 
 #define VCDC_AVAILABLE 1
-#define VCDC_TX_BUFFER_SIZE 512
-#define VCDC_RX_BUFFER_SIZE 256
+#define VCDC_TX_BUFFER_SIZE 256
+#define VCDC_RX_BUFFER_SIZE 64
 
 #define CDC_AVAILABLE 1
 #define DEFAULT_BAUDRATE 115200
 
 #define CONSOLE_USART USART2
-#define CONSOLE_TX_BUFFER_SIZE 128
+#define CONSOLE_TX_BUFFER_SIZE 256
 #define CONSOLE_RX_BUFFER_SIZE 1024
 
 #define CONSOLE_USART_GPIO_PORT GPIOA
@@ -63,17 +64,12 @@
 #define VOLTAGE_SENSE_PORT      GPIOB
 #define VOLTAGE_SENSE_PIN       GPIO1
 
-#define CURRENT_OVERLOAD_PORT   GPIOF
-#define CURRENT_OVERLOAD_PIN    GPIO0
-#define CURRENT_OVERLOAD_IRQ    EXTI1
-#define CURRENT_OVERLOAD_NVIC   NVIC_EXTI0_1_IRQ
-
+#define CURRENT_RANGE0_PORT     GPIOA
+#define CURRENT_RANGE0_PIN      GPIO10
 #define CURRENT_RANGE1_PORT     GPIOA
-#define CURRENT_RANGE1_PIN      GPIO10
+#define CURRENT_RANGE1_PIN      GPIO9
 #define CURRENT_RANGE2_PORT     GPIOA
-#define CURRENT_RANGE2_PIN      GPIO9
-#define CURRENT_RANGE3_PORT     GPIOA
-#define CURRENT_RANGE3_PIN      GPIO8
+#define CURRENT_RANGE2_PIN      GPIO8
 
 #define TARGET_IFACE_EN_PORT    GPIOA
 #define TARGET_IFACE_EN_PIN     GPIO1
@@ -95,11 +91,10 @@
 #define TIC33M_LCLK_PORT        GPIOB
 #define TIC33M_LCLK_PIN         GPIO5
 
-#define CURRENT_LOWER_THRESHOLD     30
-#define CURRENT_HIGHER_THRESHOLD    3800
-#define CURRENT_THRESHOLD_PERIOD    3
+#define CURRENT_LOWER_THRESHOLD     29
+#define CURRENT_HIGHER_THRESHOLD    3900
 
-#define FW_VERSION              "1.02"
+#define FW_VERSION              "1.10"
 
 #define BANNER_STR1             "[INF] UMDK-ENERGYMON Energy Consumption Logger"
 #define BANNER_STR2             "[INF] (c) 2019 Unwired Devices LLC - www.unwds.com"

@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016, Devan Lai
- * Copyright (c) 2018, Unwired Devices LLC
+ * Copyright (c) 2019, Unwired Devices LLC <info@unwds.com>
  *
  * Permission to use, copy, modify, and/or distribute this software
  * for any purpose with or without fee is hereby granted, provided
@@ -25,6 +25,7 @@
 #include <libopencm3/stm32/flash.h>
 #include <libopencm3/stm32/adc.h>
 #include <libopencm3/stm32/exti.h>
+#include <libopencm3/stm32/dma.h>
 
 #include <string.h>
 
@@ -43,12 +44,13 @@
 #define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
 #define FLASH_CONFIG_MAGIC  0xDEADF00D
 
-static tic33m tic33m_dev;
+#define TIM2_PRESCALER_3US  75
+#define TIM2_PRESCALER_10US 225
 
-static struct {
-    uint32_t magic;
-    uint32_t voltage_coeff;
-} emb_settings;
+#define DMA_DATA_SIZE   200
+static volatile uint16_t dma_data[DMA_DATA_SIZE];
+
+static tic33m tic33m_dev;
 
 /* Reconfigure processor settings */
 void cpu_setup(void) {
@@ -66,49 +68,52 @@ void clock_setup(void) {
 
 /* 1000 Hz frequency */
 static const uint16_t frequency = 1;
-static uint16_t button1_counter = 0;
-static uint16_t button2_counter = 0;
-static uint16_t button3_counter = 0;
+
+/* 1000 ms blink period */
+static const uint32_t blink_period_boot = 1000;
+
+static uint32_t button1_counter = 0;
+static uint32_t button2_counter = 0;
+static uint32_t button3_counter = 0;
 static uint16_t target_release_reset = 0;
 static uint16_t target_release_boot = 0;
 static uint16_t target_start_measurements = 0;
-/* static uint16_t target_enable_power = 0; */
 static bool target_power_state = false;
 static bool target_boot_state = false;
-static const uint16_t blink_period_boot = 1000;
-/* static const uint16_t blink_period_fail = 150; */
-static uint16_t blink_counter = 0;
+static uint32_t blink_counter = 0;
 static uint16_t target_power_failure = 0;
-static volatile uint32_t adc_result_r1 = 0;
-static volatile uint32_t adc_result_r2 = 0;
-static volatile uint32_t adc_result_r3 = 0;
-
-static volatile uint32_t adc_count_r1 = 0;
-static volatile uint32_t adc_count_r2 = 0;
-static volatile uint32_t adc_count_r3 = 0;
-static volatile uint32_t adc_voltage_count = 0;
 
 static volatile uint32_t adc_voltage_raw = 0;
+static volatile uint32_t seconds_passed = 0;
 static bool display_counter = false;
 static uint32_t display_mode = 0;
 static uint32_t vdda = 0;
 static uint32_t current_report_counter = 0;
-static uint8_t  current_power_range = 0;
 static bool is_interface_connected = false;
-static uint64_t energy_accumultated_uah = 0;
 static uint64_t energy_accumultated_uwh = 0;
+static uint64_t energy_accumultated_uah = 0;
+static uint32_t energy_ahr = 0;
+static uint32_t energy_whr = 0;
 static uint32_t current_max_ua = 0;
-static uint32_t seconds_passed = 0;
 static bool update_display = false;
+static volatile uint8_t led_act = 0;
 
 static bool banner_displayed = false;
-static uint16_t do_calibrate = 0;
+static uint32_t do_calibrate = 0;
+static volatile uint32_t cal_voltage = 0;
+static volatile int current_power_range = 0;
+
+static volatile uint8_t cmd_int = 0;
+
+#define USB_COMMAND_SIZE    20
+static uint8_t usb_command[USB_COMMAND_SIZE];
 
 static volatile struct {
-    uint32_t current_r1;
-    uint32_t current_r2;
-    uint32_t current_r3;
+    uint32_t current[3];
+    uint32_t raw_current[3];
+    uint32_t count[3];
     uint32_t voltage;
+    uint32_t vcount;
 } adc_data;
 
 typedef enum {
@@ -117,7 +122,20 @@ typedef enum {
     CMD_INT_LCDOUT      = 1 << 2,
 } internal_commands_t;
 
-volatile uint8_t cmd_int = 0;
+static volatile struct {
+    uint32_t magic;
+    uint32_t voltage_coeff;
+    uint32_t period;
+} emb_settings;
+
+static void save_settings(void) {
+    flash_unlock();
+    flash_erase_page(FLASH_CONFIG_ADDR);
+    flash_program_word(FLASH_CONFIG_ADDR, FLASH_CONFIG_MAGIC);
+    flash_program_word(FLASH_CONFIG_ADDR + 4, emb_settings.voltage_coeff);
+    flash_program_word(FLASH_CONFIG_ADDR + 8, emb_settings.period);
+    flash_lock();
+}
 
 static void disable_power(void) {
     /* Stop TIM2 */
@@ -129,14 +147,14 @@ static void disable_power(void) {
     /* Disable output power */
     gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     /* Disable green LED */
-    gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+    /* gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN); */
 
     target_power_state = false;
     target_boot_state = false;
     
+    gpio_clear(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
     
     vcdc_println("[INF] power disabled");
 }
@@ -153,20 +171,33 @@ static void adc_setup_common(void) {
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
     adc_set_right_aligned(ADC1);
     adc_disable_temperature_sensor();
-
+    adc_disable_dma(ADC1);
+    
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
-    adc_disable_analog_watchdog(ADC1);
+    
+    /* Enable analog watchdog on PB0 */
+    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
+    adc_enable_watchdog_interrupt(ADC1);
+    
+    /* needed for current measurements */
+    nvic_enable_irq(NVIC_ADC_COMP_IRQ);
+    nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);    
+    rcc_periph_clock_enable(RCC_DMA1);
     
     /* overwrite data in case of overrun */
     ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
+    
+    /* enable DMA circular mode */
+    ADC_CFGR1(ADC1) |= ADC_CFGR1_DMACFG;
 }
 
 static void adc_measure_current(void) {
-    nvic_enable_irq(NVIC_ADC_COMP_IRQ);
-    
     adc_power_off(ADC1);
     
-    adc_setup_common();
+    adc_disable_dma(ADC1);
+    adc_calibrate(ADC1);
     
     /* 1 us sampling time */
     adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_013DOT5);
@@ -174,19 +205,34 @@ static void adc_measure_current(void) {
     /* Measurements to be triggered by TIM2 */
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
     
-    /* No VREF needed */
-    adc_disable_vrefint();
-    
-    /* Data processed by IRQ */
-    adc_enable_eoc_interrupt(ADC1);
-    
-    /* PB0 and PB1 channels */
+    /* PB0 channel */
     uint8_t adc_channels = 8;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
+
+    dma_channel_reset(DMA1, DMA_CHANNEL1);
     
-    /* clear end-of-sequence flag */
-    ADC_ISR(ADC1) |= ADC_ISR_EOSEQ;
+	/* Highest priority. */
+	dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
+
+	/* ADC is 16 bit */
+	dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
+	dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
+
+	dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
+	dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
     
+    dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
+    dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
+    
+	dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
+	dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
+	dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+	dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
+    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
+    
+    dma_enable_channel(DMA1, DMA_CHANNEL1);
+
+    adc_enable_dma(ADC1);
     adc_power_on(ADC1);
     
     /* start ADC measurements */
@@ -199,7 +245,9 @@ static void adc_measure_current(void) {
 static void adc_measure_vdda(void) {
     adc_power_off(ADC1);
     
-    adc_setup_common();
+    adc_disable_dma(ADC1);
+    
+    adc_calibrate(ADC1);
     
     /* ~5 us sampling time */
     adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
@@ -231,16 +279,21 @@ static void adc_measure_vdda(void) {
     /* VDDA in millivolts */
     vdda = (3300 * cal_vref) / vdda;
     
+    /* Disable VREF */
+    adc_disable_vrefint();
+    
     char vdda_str[5];
     itoa(vdda, vdda_str, 10);
     vcdc_print("[VDD] ");
     vcdc_println(vdda_str);
-    
-    adc_power_off(ADC1);
 }
 
 static uint32_t adc_measure_voltage(void) {
     adc_power_off(ADC1);
+    
+    adc_disable_dma(ADC1);
+    
+    adc_calibrate(ADC1);
     
     /* ADC will be run once */
     adc_disable_external_trigger_regular(ADC1);
@@ -267,8 +320,6 @@ static uint32_t adc_measure_voltage(void) {
     }
 
     uint32_t voltage = (emb_settings.voltage_coeff * vdda * adc_read) / (4095*10*5);
-
-    adc_power_off(ADC1);
     
     return voltage;
 }
@@ -309,127 +360,109 @@ static void calibrate_voltage(uint32_t cal_value) {
     
     adc_power_off(ADC1);
     
-    flash_unlock();
-    flash_erase_page(FLASH_CONFIG_ADDR);
-    flash_program_word(FLASH_CONFIG_ADDR, FLASH_CONFIG_MAGIC);
-    flash_program_word(FLASH_CONFIG_ADDR + 4, emb_settings.voltage_coeff);
-    flash_lock();
+    save_settings();
 }
 
+void dma1_channel1_isr(void) {
+    /* half transfer event */
+    if ((DMA1_ISR & DMA_ISR_HTIF1) != 0) {
+		DMA1_IFCR |= DMA_IFCR_CHTIF1;
+        for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
+            adc_data.raw_current[current_power_range] += dma_data[i];
+        }
+        adc_data.count[current_power_range] += DMA_DATA_SIZE/2;
+    }
+    
+    /* transfer completed event */
+    if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
+		DMA1_IFCR |= DMA_IFCR_CTCIF1;
+        for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
+            adc_data.raw_current[current_power_range] += dma_data[i];
+        }
+        adc_data.count[current_power_range] += DMA_DATA_SIZE/2;
+    }
+}
 
-volatile int current_overflow_ctr = 0;
-volatile int current_underflow_ctr = 0;
-
+/* analog watchdog interrupt */
 void adc_comp_isr(void)
 {
-    uint16_t adc_sample = adc_read_regular(ADC1);
-    
-    switch (current_power_range) {
-        case 3:
-            adc_result_r3 += adc_sample;
-            adc_count_r3++;
-            break;
-        case 2:
-            adc_result_r2 += adc_sample;
-            adc_count_r2++;
-            break;
-        case 1:
-            adc_result_r1 += adc_sample;
-            adc_count_r1++;
-            break;
-        default:
-            break;
-    }
+    timer_disable_counter(TIM2);
+    adc_clear_watchdog_flag(ADC1);
+    dma_disable_channel(DMA1, DMA_CHANNEL1);
 
-    if (adc_sample < CURRENT_LOWER_THRESHOLD) {
-        timer_disable_counter(TIM2);
-        if (current_power_range != 1) {
-            if (++current_underflow_ctr > CURRENT_THRESHOLD_PERIOD) {        
-                current_underflow_ctr = 0;
-                if (current_power_range == 3) {
-                    /* make-before-break! */
-                    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                }
-                else { /* range 2 */
+    uint16_t data_number = DMA_DATA_SIZE - dma_get_number_of_data(DMA1, DMA_CHANNEL1);
+    uint16_t adc_sample = ADC_DR(ADC1);
+
+    if ((adc_sample < CURRENT_LOWER_THRESHOLD) || (adc_sample > CURRENT_HIGHER_THRESHOLD)) {
+        led_act = 2;
+        
+        int start = 0;
+        if (data_number > DMA_DATA_SIZE/2) {
+            start = DMA_DATA_SIZE/2;
+        } else {
+            start = 0;
+        }
+
+        adc_data.count[current_power_range] += (data_number - start);
+        
+        for (int i = start; i < data_number; i++) {
+            adc_data.raw_current[current_power_range] += dma_data[i];
+        }
+
+        if (adc_sample < CURRENT_LOWER_THRESHOLD) {
+            if (current_power_range != 0) {
+                if (current_power_range == 2) {
                     /* make-before-break! */
                     gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
                     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
                 }
+                else { /* range 1 */
+                    /* disable watchdog low threshold */
+                    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT);
+                    
+                    /* make-before-break! */
+                    gpio_set(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
+                    gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                }
                 current_power_range--;
             }
         }
-        timer_enable_counter(TIM2);
-    } else {        
-        if (adc_sample > CURRENT_HIGHER_THRESHOLD) {
-            timer_disable_counter(TIM2);
-            if (++current_overflow_ctr > CURRENT_THRESHOLD_PERIOD) {
-                current_overflow_ctr = 0;
-                if (current_power_range == 1) {
+        else {        /* adc_sample > CURRENT_HIGHER_THRESHOLD */
+            if (current_power_range != 2) {
+                if (current_power_range == 0) {
+                    /* make-before-break! */
+                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    gpio_clear(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
+
+                    /* reenable watchdog low threshold */
+                    ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
+                } else {
                     /* make-before-break! */
                     gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
                     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                } else {
-                    if (current_power_range == 2) {
-                        /* make-before-break! */
-                        gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                        gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    }
                 }
                 current_power_range++;
+            } else {
+                led_act = 10;
             }
-            timer_enable_counter(TIM2);
-        } else {
-            current_underflow_ctr = 0;
-            current_overflow_ctr = 0;
         }
     }
+
+    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
+    dma_enable_channel(DMA1, DMA_CHANNEL1);
+    timer_enable_counter(TIM2);
 }
 
-void exti0_1_isr(void)
-{
-    exti_reset_request(CURRENT_OVERLOAD_IRQ);
+static int str_to_int(uint8_t *str) {
+    int  i = 0;
+    int num = 0;
+    
+    while ((str[i] >= '0') && (str[i] <= '9')) {
+        num = num * 10 + ( str[i] - '0' );
+        i++;
+    };
 
-    if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
-        /* stop TIM2 */
-        timer_disable_counter(TIM2);
-        
-        /* discard any ongoing ADC conversion */
-        ADC_CR(ADC1) |= ADC_CR_ADSTP;
-        
-        current_overflow_ctr = 0;
-        current_underflow_ctr = 0;
-        
-        if (current_power_range == 1) {
-            gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-            current_power_range = 2;
-            
-            if (gpio_get(CURRENT_OVERLOAD_PORT, CURRENT_OVERLOAD_PIN)) {
-                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                current_power_range = 3;
-            }
-            
-            gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-        } else {
-            if (current_power_range == 2) {
-                gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                current_power_range = 3;
-            }
-        }
-        
-        /* restart ADC conversion */
-        while (ADC_CR(ADC1) & ADC_CR_ADSTART) {};
-        ADC_CR(ADC1) |= ADC_CR_ADSTART;
-        
-        /* clear ADC DR just in case */
-        uint16_t adcval = adc_read_regular(ADC1);
-        (void) adcval;
-        
-        /* restart TIM2 */
-        timer_enable_counter(TIM2);
-    }
+    return num;
 }
 
 /* ticks every 1 ms */
@@ -438,8 +471,93 @@ void tim3_isr(void)
     current_report_counter++;
     
     /* every 10 ms */
-    if ((current_report_counter % 10) == 0) {
+    if (current_report_counter && (current_report_counter % 10 == 0)) {
         tic33m_lclk(&tic33m_dev);
+    }
+    
+    /* every 100 ms */
+    if (current_report_counter && (current_report_counter % 100 == 0)) {
+        if (led_act) {
+            if (--led_act) {
+                gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
+            } else {
+                gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
+            }
+        }
+
+        /* console command parser */
+        if (vcdc_recv_buffered(usb_command, USB_COMMAND_SIZE) != 0) {
+            if (memcmp((char *)usb_command, "help", strlen("help")) == 0) {
+                vcdc_println("period <ms> - set period in milliseconds, 10 to 1000");
+                vcdc_send_buffer_space();
+                vcdc_println("iface <on|off> - enable/disable UART and SWD interfaces");
+                vcdc_send_buffer_space();
+                vcdc_println("power <on|off> - enable/disable onboard DC/DC");
+                vcdc_send_buffer_space();
+                vcdc_println("display <N> - set display mode by number");
+                vcdc_send_buffer_space();
+                vcdc_println("calibrate <mV> - calibrate voltage divider");
+                vcdc_send_buffer_space();
+            }
+            
+            if (memcmp((char *)usb_command, "period ", strlen("period ")) == 0) {
+                int period = str_to_int(&usb_command[strlen("period ")]);
+
+                if ((period >= 10) && (period <= 1000)) {
+                    vcdc_print("[INF] Period is ");
+                    char str[10];
+                    itoa(period, str, 10);
+                    vcdc_print(str);
+                    vcdc_println(" ms");
+                    
+                    emb_settings.period = period;
+                    save_settings();
+                }
+            }
+            
+            if (memcmp((char *)usb_command, "iface ", strlen("iface ")) == 0) {
+                if (memcmp((char *)&usb_command[strlen("iface ")], "on", 2) == 0) {
+                    is_interface_connected = false;
+                    button2_counter = 100;
+                }
+                if (memcmp((char *)&usb_command[strlen("iface ")], "off", 3) == 0) {
+                    is_interface_connected = true;
+                    button2_counter = 100;
+                }
+            }
+            
+            if (memcmp((char *)usb_command, "power ", strlen("power ")) == 0) {
+                if (memcmp((char *)&usb_command[strlen("power ")], "on", 2) == 0) {
+                    target_power_state = false;
+                    button1_counter = 100;
+                }
+                if (memcmp((char *)&usb_command[strlen("power ")], "off", 3) == 0) {
+                    target_power_state = true;
+                    button1_counter = 100;
+                }
+            }
+                    
+            if (memcmp((char *)usb_command, "display ", strlen("display ")) == 0) {
+                display_mode = str_to_int(&usb_command[strlen("display ")]);
+            }
+            
+            if (memcmp((char *)usb_command, "calibrate ", strlen("calibrate ")) == 0) {
+                cal_voltage = str_to_int(&usb_command[strlen("calibrate ")]);
+                if ((cal_voltage > 0) && (cal_voltage < 20000)) {
+                    /* Enable DC/DC power */
+                    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+                    /* delay before calibration 1500 ms */
+                    do_calibrate = 1500;
+                    
+                    char str[10] = { };
+                    strcpy(str, "CAL ");
+                    itoa(cal_voltage, &str[strlen(str)], 10);
+                    
+                    tic33m_display_string(&tic33m_dev, str, strlen(str));
+                    current_report_counter = 1;
+                }
+            }
+        }
     }
     
     if (do_calibrate) {
@@ -451,8 +569,8 @@ void tim3_isr(void)
         }
     }
     
-    /* every 100 ms */
-    if ((current_report_counter % 100) == 0) {
+    /* every 'emb_settings.period' ms */
+    if (current_report_counter &&  (current_report_counter % emb_settings.period == 0)) {
         
         /* only once */
         if (!banner_displayed) {
@@ -468,10 +586,16 @@ void tim3_isr(void)
             banner_displayed = true;
             
             if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
-                vcdc_println("Configuration NOT loaded");
+                vcdc_println("[ERR] Configuration NOT loaded");
             } else {
-                vcdc_println("Configuration loaded");
+                vcdc_println("[INF] Configuration loaded");
             }
+            
+            char str[10];
+            itoa(emb_settings.period, str, 10);
+            vcdc_print("[INF] Period is ");
+            vcdc_print(str);
+            vcdc_println(" ms");
         }
 
         /* calculate average ADC value */
@@ -480,45 +604,208 @@ void tim3_isr(void)
             timer_disable_counter(TIM2);
             adc_data.voltage = adc_measure_voltage();
 
-            /* convert to mV then convert to uA */
-            /* 1 uA = 10.1 mV on range 1 */
-            uint32_t adc_r1 = adc_result_r1;
-            uint32_t adc_r2 = adc_result_r2;
-            uint32_t adc_r3 = adc_result_r3;
-            uint32_t adc_c1 = adc_count_r1;
-            uint32_t adc_c2 = adc_count_r2;
-            uint32_t adc_c3 = adc_count_r3;
-            
-            adc_result_r1 = 0;
-            adc_count_r1 = 0;
-            adc_result_r2 = 0;
-            adc_count_r2 = 0;
-            adc_result_r3 = 0;
-            adc_count_r3 = 0;
+            /* convert to millivolts x10 */
+            for (int i = 0; i < 3; i++) {
+                if (adc_data.count[i]) {
+                    adc_data.current[i] = (vdda * ((10*adc_data.raw_current[i])/adc_data.count[i])) / 4095;
+#if ENABLE_DEBUG
+                    char str[10];
+                    vcdc_print("RAW ADC: ");
+                    itoa(i, str, 10);
+                    vcdc_print(str);
+                    vcdc_print(": ");
+                    
+                    itoa(adc_data.raw_current[i], str, 10);
+                    vcdc_print(str);
+                    vcdc_print(" / ");
+
+                    itoa(adc_data.count[i], str, 10);
+                    vcdc_print(str);
+                    vcdc_print(" = ");
+
+                    itoa(adc_data.raw_current[i]/adc_data.count[i], str, 10);
+                    vcdc_println(str);
+#endif
+                } else {
+                    adc_data.current[i] = 0;
+                }
+                adc_data.raw_current[i] = 0;
+                adc_data.count[i] = 0;
+            }
             
             adc_measure_current();
-            
-            adc_data.current_r1 = (vdda * ((10*adc_r1)/adc_c1)) / 4095;
-            adc_data.current_r2 = (vdda * ((10*adc_r2)/adc_c2)) / 4095;
-            adc_data.current_r3 = (vdda * ((10*adc_r3)/adc_c3)) / 4095;
             
             cmd_int |= CMD_INT_CONSOLEOUT;
         }
     }
     
-    /* every 2 seconds */
-    if ((current_report_counter == 2000) || update_display) {
-        if (target_power_state) {
-            seconds_passed += 2;
-        }
-        
-        cmd_int |= CMD_INT_LCDOUT;
-
-        if (current_report_counter == 2000) {
-            current_report_counter = 0;
+    if (target_release_reset) {
+        if (--target_release_reset == 0) {
+            /* Release reset */
+#if nRESET_GPIO_INVERT
+            gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
+            gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
+            vcdc_println("[INF] target reset");
+            console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
         }
     }
     
+    if (target_start_measurements) {
+        if (--target_start_measurements == 0) {
+            adc_measure_vdda();
+            adc_measure_current();
+        }
+    }
+
+    /* Blink a LED if target bootloader mode active */
+    if (target_boot_state) {
+        if (--blink_counter == 0) {
+            blink_counter = blink_period_boot;
+            gpio_toggle(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+        }
+    }
+
+    if (target_release_boot) {
+        if (--target_release_boot == 0) {
+            /* Release boot */
+            gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
+            vcdc_println("[INF] target bootloader activated");
+        }
+    }
+    
+    /* Check if INTERFACE DISCONNECT button is pressed */
+    if (gpio_get(TARGET_IFACE_BTN_PORT, TARGET_IFACE_BTN_PIN) == 0) {
+        button2_counter++;
+    } else {
+        /* button released */
+        if (button2_counter >= 100) {
+            if (is_interface_connected) {
+                gpio_clear(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
+                is_interface_connected = false;
+            } else {
+                gpio_set(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
+                is_interface_connected = true;
+            }
+        }
+        button2_counter = 0;
+    }
+    
+    /* Check if DISPLAY MODE button is pressed */
+    if (gpio_get(DISPLAY_MODE_BTN_PORT, DISPLAY_MODE_BTN_PIN) == 0) {
+        if (++button3_counter >= 5000) {
+            /* Enable DC/DC power */
+            gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+            /* delay before calibration 1500 ms */
+            do_calibrate = 1500;
+            
+            /* calibrate @ 3000 mV */
+            cal_voltage = 3000;
+            tic33m_display_string(&tic33m_dev, "CAL 3000", strlen("CAL 3000"));
+            current_report_counter = 1;
+        }
+    } else {
+        /* button released */
+        if ((button3_counter >= 100) && (button3_counter < 5000)) {
+            if (++display_mode == 3) {
+                display_mode = 0;
+            }
+            update_display = true;
+        }
+        button3_counter = 0;
+    } 
+
+    /* Check if POWER button is pressed */
+    if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) != 0) {
+        if ((++button1_counter == 1000) && target_power_state) {
+            /* 1000 ms long press */
+            target_boot_state = !target_boot_state;
+            /* Reset target */
+#if nRESET_GPIO_INVERT
+            gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
+            gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
+        
+            if (target_boot_state) {            
+                /* Boot from system memory */
+                gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
+                target_release_boot = 500;
+            } else {
+                /* Enable green LED */
+                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+            }            
+            target_release_reset = 1;
+        }
+    } else {
+        /* button released */
+        if ((button1_counter >= 100) && (button1_counter < 1000)) {
+            /* 100 ms short press */    
+            target_power_state = !target_power_state;
+            
+            /* Enable green LED */
+            gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+        
+            /* Toggle power */
+            if (target_power_state) {
+                /* Reset target */
+#if nRESET_GPIO_INVERT
+                gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#else
+                gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+#endif
+                /* Set boot from flash */
+                gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
+                /* Reset accumulated energy */
+                energy_accumultated_uah = 0;
+                energy_accumultated_uwh = 0;
+                seconds_passed = 0;
+                /* Enable DC/DC power */
+                gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
+                /* Enable current shunt (range 2 by default) */
+                gpio_clear(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
+                gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                current_power_range = 1;
+                current_max_ua = 0;
+                
+                /* enable green LED */
+                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+
+                target_boot_state = false;
+                target_power_failure = 0;
+                
+                target_release_reset = 100;
+                
+                /* start current monitoring in 100 ms */
+                target_start_measurements = 100;
+                
+                vcdc_println("[INF] power enabled");
+            } else {
+                disable_power();
+            }
+        }
+        button1_counter = 0;
+    }
+    
+    /* every second */
+    if (current_report_counter && (current_report_counter % 1000 == 0)) {
+        if (target_power_state) {
+            seconds_passed += 1;
+        }
+    }
+    
+    /* every 2 seconds */
+    if (current_report_counter == 2000) {
+        cmd_int |= CMD_INT_LCDOUT;
+        current_report_counter = 0;
+    }
+    
+    if (update_display) {
+        cmd_int |= CMD_INT_LCDOUT;
+    }
+
     if (timer_get_flag(TIM3, TIM_SR_CC1IF)) {
         /* Clear compare interrupt flag. */
         timer_clear_flag(TIM3, TIM_SR_CC1IF);
@@ -527,255 +814,150 @@ void tim3_isr(void)
         uint16_t new_time = timer_get_counter(TIM3) + frequency;
 
         timer_set_oc_value(TIM3, TIM_OC1, new_time);
-    
-        if (target_release_reset) {
-            target_release_reset--;
-        
-            if (target_release_reset == 0) {
-                /* Release reset */
-#if nRESET_GPIO_INVERT
-                gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#else
-                gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#endif
-                vcdc_println("[INF] target reset");
-                console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
-            }
-        }
-        
-        if (target_start_measurements) {
-            target_start_measurements--;
-            
-            if (target_start_measurements == 0) {
-                adc_measure_vdda();
-                adc_measure_current();
-            }
-        }
-
-        /* Blink a LED if target bootloader mode active */
-        if (target_boot_state) {
-            if (blink_counter == 0) {
-                blink_counter = blink_period_boot;
-                gpio_toggle(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-            }
-            blink_counter--;
-        }
-    
-        if (target_release_boot) {
-            target_release_boot--;
-        
-            if (target_release_boot == 0) {
-                /* Release boot */
-                gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
-                vcdc_println("[INF] target bootloader activated");
-            }
-        }
-        
-        /* Check if INTERFACE DISCONNECT button is pressed */
-        if (gpio_get(TARGET_IFACE_BTN_PORT, TARGET_IFACE_BTN_PIN) == 0) {
-            button2_counter++;
-        } else {
-            /* button released */
-            if (button2_counter >= 100) {
-                if (is_interface_connected) {
-                    gpio_clear(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
-                    is_interface_connected = false;
-                } else {
-                    gpio_set(TARGET_IFACE_EN_PORT, TARGET_IFACE_EN_PIN);
-                    is_interface_connected = true;
-                }
-            }
-            button2_counter = 0;
-        }
-        
-        /* Check if DISPLAY MODE button is pressed */
-        if (gpio_get(DISPLAY_MODE_BTN_PORT, DISPLAY_MODE_BTN_PIN) == 0) {
-            button3_counter++;
-            
-            if (button3_counter > 5000) {
-                /* Enable DC/DC power */
-                gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
-                /* delay before calibration 1500 ms */
-                do_calibrate = 1500;
-                uint8_t digits[9];
-                digits[0] = TIC33M_SYMB_C;
-                digits[1] = TIC33M_SYMB_A;
-                digits[2] = TIC33M_SYMB_L;
-                digits[3] = TIC33M_SYMB_SPACE;
-                digits[4] = 3;
-                digits[5] = 0;
-                digits[6] = 0;
-                digits[7] = 0;
-                digits[8] = TIC33M_SYMB_SPACE;
-                
-                tic33m_display_string(&tic33m_dev, digits);
-                current_report_counter = 1;
-            }
-        } else {
-            /* button released */
-            if ((button3_counter >= 100) && (button3_counter < 5000)) {
-                if (++display_mode == 3) {
-                    display_mode = 0;
-                }
-                update_display = true;
-            }
-            button3_counter = 0;
-        } 
-    
-        /* Check if POWER button is pressed */
-        if (gpio_get(nBOOT0_GPIO_PORT, nBOOT0_GPIO_PIN) != 0) {
-            button1_counter++;
-            if ((button1_counter == 1000) && target_power_state) {
-                /* 1000 ms long press */
-                target_boot_state = !target_boot_state;
-                /* Reset target */
-#if nRESET_GPIO_INVERT
-                gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#else
-                gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#endif
-            
-                if (target_boot_state) {            
-                    /* Boot from system memory */
-                    gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
-                    target_release_boot = 500;
-                } else {
-                    /* Enable green LED */
-                    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-                }            
-                target_release_reset = 1;
-            }
-        } else {
-            /* button released */
-            if ((button1_counter >= 100) && (button1_counter < 1000)) {
-                /* 100 ms short press */    
-                target_power_state = !target_power_state;
-            
-                /* Toggle power */
-                if (target_power_state) {
-                    /* Reset target */
-#if nRESET_GPIO_INVERT
-                    gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#else
-                    gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
-#endif
-                    /* Set boot from flash */
-                    gpio_set(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
-                    /* Reset accumulated energy */
-                    energy_accumultated_uah = 0;
-                    seconds_passed = 0;
-                    /* Enable DC/DC power */
-                    gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
-                    /* Enable current shunt (range 3 by default) */
-                    gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                    gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    gpio_set(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
-                    current_power_range = 3;
-                    current_max_ua = 0;
-                    
-                    /* enable green LED */
-                    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-
-                    target_boot_state = false;
-                    target_power_failure = 0;
-                    
-                    target_release_reset = 100;
-                    
-                    /* start current monitoring in 100 ms */
-                    target_start_measurements = 100;
-                    
-                    vcdc_println("[INF] power enabled");
-                } else {
-                    disable_power();
-                }
-            }
-            button1_counter = 0;
-        }
     }
 }
 
 void user_activity(void) {
     if (cmd_int & CMD_INT_CALIBRATE) {
         cmd_int &= ~CMD_INT_CALIBRATE;
-        calibrate_voltage(3000);
+        calibrate_voltage(cal_voltage);
         disable_power();
     }
+    
+    char cur_str[10] = { 0 };
     
     if (cmd_int & CMD_INT_CONSOLEOUT) {
         cmd_int &= ~CMD_INT_CONSOLEOUT;
 
         uint32_t current = 0;
-        if (adc_data.current_r1) {
-            current += (10 * adc_data.current_r1) / 102;
+        uint32_t n = 0;
+        if (adc_data.current[0]) {
+            n++;
         }
-        if (adc_data.current_r2) {
-            current += 10 * ((100 * adc_data.current_r2) / 102);
+        if (adc_data.current[1]) {
+            n++;
         }
-        if (adc_data.current_r3) {
-            current += 1000 * ((100 * adc_data.current_r3) / 102);
+        if (adc_data.current[2]) {
+            n++;
+        }
+        
+        current = ((10 * adc_data.current[0]) / 102) +
+                   (100 * ((10 * adc_data.current[1]) / 102)) + 
+                   (100 * 100 * ((10 * adc_data.current[2]) / 102));
+        
+        if (n > 1) {
+            current /= n;
         }
         
         if (current > current_max_ua) {
             current_max_ua = current;
         }
+        
+        /* energy */
+        energy_accumultated_uah += current;
+        energy_accumultated_uwh += current * adc_data.voltage / 1000;
+        
+        /* convert to microampere-hours */
+        energy_ahr = energy_accumultated_uah/(3600*10*(1000/emb_settings.period));
+        /* convert to microwatt-hours */
+        energy_whr = energy_accumultated_uwh/(3600*10*(1000/emb_settings.period));
 
-        char cur_str[10] = { 0 };
+        itoa(seconds_passed, cur_str, 10);
+        vcdc_print("[SEC] ");
+        vcdc_println(cur_str);
+        
         itoa(adc_data.voltage, cur_str, 10);
         vcdc_print("[VOL] ");
         vcdc_println(cur_str);
      
         vcdc_print("[CUR] ");
-#if ENABLE_DEBUG
         itoa(current/10, cur_str, 10);
         vcdc_print(cur_str);
         itoa(current % 10, cur_str, 10);
         vcdc_print(".");
+#if ENABLE_DEBUG
         vcdc_print(cur_str);
 
-        itoa(adc_data.current_r1, cur_str, 10);
+        itoa(adc_data.current[0], cur_str, 10);
         vcdc_print(" (");
         vcdc_print(cur_str);
         
-        itoa(adc_data.current_r2, cur_str, 10);
+        itoa(adc_data.current[1], cur_str, 10);
         vcdc_print(" - ");
         vcdc_print(cur_str);
         
-        itoa(adc_data.current_r3, cur_str, 10);
+        itoa(adc_data.current[2], cur_str, 10);
         vcdc_print(" - ");
         vcdc_print(cur_str);
         vcdc_println(")");
 #else
-        itoa(current/10, cur_str, 10);
-        vcdc_print(cur_str);
-        
-        itoa(current % 10, cur_str, 10);
-        vcdc_print(".");
         vcdc_println(cur_str);
 #endif
+        itoa(energy_ahr, cur_str, 10);
+        vcdc_print("[AHR] ");
+        vcdc_println(cur_str);
         
-        /* microamperes * 100ms */
-        energy_accumultated_uah += current;
-        energy_accumultated_uwh += current * adc_data.voltage / 1000;
+        itoa(energy_whr, cur_str, 10);
+        vcdc_print("[WHR] ");
+        vcdc_println(cur_str);
     }
 
     if (cmd_int & CMD_INT_LCDOUT) {
         cmd_int &= ~CMD_INT_LCDOUT;
         if (display_counter || update_display) {
+            char lcdtext[11] = { };
+            memset(lcdtext, ' ', 10);
+            
+            int precision;
+            uint32_t value;
+            
             switch (display_mode) {
                 case 1:
                     /* maximum current  */
-                    tic33m_display_number(&tic33m_dev, current_max_ua/10, 0, TIC33M_SYMB_I);
+                    value = current_max_ua/10;
+                    lcdtext[0] = 'I';
+                    precision = 0;
                     break;
                 case 2:
-                    /* convert from 10*uW*100ms to uW*h */
-                    tic33m_display_number(&tic33m_dev, energy_accumultated_uwh/360000, 3, TIC33M_SYMB_P);
+                    /* microwatt-hours */
+                    value = energy_whr;
+                    lcdtext[0] = 'P';
+                    precision = 3;
                     break;
                 default:
-                    /* convert from 10*uA*100ms to uA*h */
-                    tic33m_display_number(&tic33m_dev, energy_accumultated_uah/360000, 3, TIC33M_SYMB_C);
+                    /* microampere-hours */
+                    value = energy_ahr;
+                    lcdtext[0] = 'C';
+                    precision = 3;
                     break;
             }
-            display_counter = false;
+            
+            itoa(value, cur_str, 10);
+            int len = strlen(cur_str);
+
+            if ((len > 8) || ((len > 7) && (precision > 0))) {
+                strcpy(&lcdtext[1], "       OL");
+            } else {
+                /* add forwarding zeros if needed */
+                if (len <= precision) {
+                    memmove(&cur_str[1 + precision - len], cur_str, len + 1);
+                    memset(cur_str, '0', 1 + precision - len);
+                    len = strlen(cur_str);
+                }
+                memcpy(&lcdtext[9 - len], cur_str, len - precision + 1);
+
+                /* add decimal point if needed */
+                if (precision) {
+                    lcdtext[9 - precision] = '.';
+                    memcpy(&lcdtext[9 - precision + 1], &cur_str[len - precision], precision + 1);
+                }
+            }
+
+            tic33m_display_string(&tic33m_dev, lcdtext, strlen(lcdtext));
+            
+            if (!update_display) {
+                display_counter = false;
+            }
         } else {
             /* display time */
             tic33m_display_time(&tic33m_dev, seconds_passed);
@@ -785,16 +967,16 @@ void user_activity(void) {
     }
 }
 
-/* starts ADC conversion every 10 us */
+/* starts ADC conversion every ~3 us */
 static void tim2_setup(void)
 {
     rcc_periph_clock_enable(RCC_TIM2);
 
-    /* Generates ~10 us clock */
+    /* Generates ~3 us clock */
     rcc_periph_reset_pulse(RST_TIM2);
     timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
     timer_set_period(TIM2, 1);
-    timer_set_prescaler(TIM2, 225);
+    timer_set_prescaler(TIM2, TIM2_PRESCALER_3US);
     timer_set_clock_division(TIM2, 0x0);
     /* Generate TRGO on every update. */
     timer_set_master_mode(TIM2, TIM_CR2_MMS_UPDATE);
@@ -899,26 +1081,20 @@ void gpio_setup(void) {
     /* Disable output power */
     gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
     
-    /* Configure current overload IRQ */
     rcc_peripheral_enable_clock(&RCC_APB2ENR, RCC_APB2ENR_SYSCFGCOMPEN);
-    nvic_enable_irq(CURRENT_OVERLOAD_NVIC);
-    gpio_mode_setup(CURRENT_OVERLOAD_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, CURRENT_OVERLOAD_PIN);
-    exti_select_source(CURRENT_OVERLOAD_IRQ, CURRENT_OVERLOAD_PORT);
-    exti_set_trigger(CURRENT_OVERLOAD_IRQ, EXTI_TRIGGER_RISING);
-    exti_enable_request(CURRENT_OVERLOAD_IRQ);
     
     /* Current ranges select */
+    gpio_set_output_options(CURRENT_RANGE0_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, CURRENT_RANGE0_PIN);
+    gpio_mode_setup(CURRENT_RANGE0_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE0_PIN);
     gpio_set_output_options(CURRENT_RANGE1_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, CURRENT_RANGE1_PIN);
     gpio_mode_setup(CURRENT_RANGE1_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE1_PIN);
     gpio_set_output_options(CURRENT_RANGE2_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, CURRENT_RANGE2_PIN);
     gpio_mode_setup(CURRENT_RANGE2_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE2_PIN);
-    gpio_set_output_options(CURRENT_RANGE3_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, CURRENT_RANGE3_PIN);
-    gpio_mode_setup(CURRENT_RANGE3_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, CURRENT_RANGE3_PIN);
     
     /* Disable all shunts */
+    gpio_clear(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
     gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
     gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-    gpio_clear(CURRENT_RANGE3_PORT, CURRENT_RANGE3_PIN);
     current_power_range = 0;
 
     /* Power on in 100 ms by TIM3 */
@@ -928,9 +1104,16 @@ void gpio_setup(void) {
     tim2_setup();
     tim3_setup();
     
+    /* Setup ADC */
+    adc_setup_common();
+    
     memcpy((void *)&emb_settings, (void *)FLASH_CONFIG_ADDR, sizeof(emb_settings));
     if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
         emb_settings.voltage_coeff = 0;
+    }
+    
+    if ((emb_settings.period < 10) || (emb_settings.period >= 1000)) {
+        emb_settings.period = 100;
     }
     
     gpio_set_output_options(TIC33M_LCLK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TIC33M_LCLK_PIN);
@@ -948,28 +1131,15 @@ void gpio_setup(void) {
     
     tic33m_init(&tic33m_dev);
     
-    uint8_t digits[9];
+    int len = strlen(FW_VERSION);
     if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
-        digits[0] = TIC33M_SYMB_E;
-        digits[1] = TIC33M_SYMB_R;
-        digits[2] = TIC33M_SYMB_R;
+        tic33m_display_string(&tic33m_dev, "ERR   " FW_VERSION, 6 + len);
     } else {
-        digits[0] = TIC33M_SYMB_C;
-        digits[1] = TIC33M_SYMB_A;
-        digits[2] = TIC33M_SYMB_L;
+        tic33m_display_string(&tic33m_dev, "CAL   " FW_VERSION, 6 + len);
     }
-    digits[3] = TIC33M_SYMB_SPACE;
-    digits[4] = TIC33M_SYMB_SPACE;
-    digits[5] = TIC33M_SYMB_SPACE;
 
-    /* Convert string to digits, point after first digit */
-    digits[6] = (FW_VERSION[0] - 0x30) | (1<<7);
-    digits[7] = (FW_VERSION[2] - 0x30);
-    digits[8] = (FW_VERSION[3] - 0x30);
-
-    tic33m_display_string(&tic33m_dev, digits);
-    
-    gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+    /* enable green LED */
+    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
 }
 
 void target_console_init(void) {
