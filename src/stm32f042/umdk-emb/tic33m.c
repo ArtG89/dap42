@@ -21,20 +21,6 @@
 #include <string.h>
 #include "tic33m.h"
 
-#define   TIC33M_MINUS      10
-#define   TIC33M_DEGREE     11
-#define   TIC33M_SPACE      12
-#define   TIC33M_UNDERSCORE 13
-#define   TIC33M_UPPERSCORE 14
-#define   TIC33M_I          15
-#define   TIC33M_U          16
-#define   TIC33M_P          17
-#define   TIC33M_C          18
-#define   TIC33M_A          19
-#define   TIC33M_L          20
-#define   TIC33M_E          21
-#define   TIC33M_R          22
-
 typedef struct {
     char symbol;
     uint8_t code;
