@@ -470,6 +470,8 @@ void adc_comp_isr(void)
             while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
             TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
             adc_sample = ADC_DR(ADC1);
+        } else {
+            break;
         }
     }
         
