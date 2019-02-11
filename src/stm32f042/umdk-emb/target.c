@@ -392,8 +392,9 @@ void dma1_channel1_isr(void) {
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
             data += dma_data[i];
         }
+        data /= DMA_DATA_SIZE/2;
         adc_data.raw_current[range] += data;
-        adc_data.count[range] += DMA_DATA_SIZE/2;
+        adc_data.count[range] += 1;
     }
     
     /* transfer completed event */
@@ -403,8 +404,9 @@ void dma1_channel1_isr(void) {
             data += dma_data[i];
             
         }
+        data /= DMA_DATA_SIZE/2;
         adc_data.raw_current[range] += data;
-        adc_data.count[range] += DMA_DATA_SIZE/2;
+        adc_data.count[range] += 1;
     }
 }
 
