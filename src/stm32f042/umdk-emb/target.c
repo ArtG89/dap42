@@ -54,6 +54,22 @@ static volatile uint16_t dma_data[DMA_DATA_SIZE];
 
 static tic33m tic33m_dev;
 
+/*
+ * Divide positive or negative dividend by positive divisor and round
+ * to closest integer. Result is undefined for negative divisors and
+ * for negative dividends if the divisor variable type is unsigned.
+ */
+#define DIV_ROUND_CLOSEST(x, divisor)(			\
+{							\
+	typeof(x) __x = x;				\
+	typeof(divisor) __d = divisor;			\
+	(((typeof(x))-1) > 0 ||				\
+	 ((typeof(divisor))-1) > 0 || (__x) > 0) ?	\
+		(((__x) + ((__d) / 2)) / (__d)) :	\
+		(((__x) - ((__d) / 2)) / (__d));	\
+}							\
+)
+
 /* Reconfigure processor settings */
 void cpu_setup(void) {
 
@@ -392,7 +408,7 @@ void dma1_channel1_isr(void) {
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
             data += dma_data[i];
         }
-        data /= DMA_DATA_SIZE/2;
+        data = DIV_ROUND_CLOSEST(data, DMA_DATA_SIZE/2);
         adc_data.raw_current[range] += data;
         adc_data.count[range] += 1;
     }
@@ -404,7 +420,7 @@ void dma1_channel1_isr(void) {
             data += dma_data[i];
             
         }
-        data /= DMA_DATA_SIZE/2;
+        data = DIV_ROUND_CLOSEST(data, DMA_DATA_SIZE/2);
         adc_data.raw_current[range] += data;
         adc_data.count[range] += 1;
     }
@@ -782,7 +798,7 @@ void tim3_isr(void)
             /* convert to millivolts x10 */
             for (int i = 0; i < 3; i++) {
                 if (adc_data.count[i]) {
-                    adc_data.current[i] = (vdda * ((10*adc_data.raw_current[i])/adc_data.count[i])) / 4095;
+                    adc_data.current[i] = (vdda * (DIV_ROUND_CLOSEST(10*adc_data.raw_current[i], adc_data.count[i]))) / 4095;
 #if ENABLE_DEBUG
                     char str[10];
                     vcdc_print("RAW ADC: ");
@@ -798,7 +814,7 @@ void tim3_isr(void)
                     vcdc_print(str);
                     vcdc_print(" = ");
 
-                    itoa(adc_data.raw_current[i]/adc_data.count[i], str, 10);
+                    itoa(DIV_ROUND_CLOSEST(adc_data.raw_current[i], adc_data.count[i]), str, 10);
                     vcdc_println(str);
 #endif
                 } else {
@@ -1016,9 +1032,9 @@ void user_activity(void) {
             n++;
         }
         
-        current = ((10 * adc_data.current[0]) / 102) +
-                   (100 * ((10 * adc_data.current[1]) / 102)) + 
-                   (100 * 100 * ((10 * adc_data.current[2]) / 102));
+        current = (DIV_ROUND_CLOSEST(10 * adc_data.current[0], 102)) +
+                  (100 * DIV_ROUND_CLOSEST(10 * adc_data.current[1], 102)) + 
+                  (100 * 100 * DIV_ROUND_CLOSEST(10 * adc_data.current[2], 102));
         
         if (n > 1) {
             current /= n;
@@ -1030,7 +1046,7 @@ void user_activity(void) {
         
         /* energy */
         energy_accumultated_uah += current;
-        energy_accumultated_uwh += current * adc_data.voltage / 1000;
+        energy_accumultated_uwh += DIV_ROUND_CLOSEST(current * adc_data.voltage, 1000);
         
         /* convert to microampere-hours */
         energy_ahr = energy_accumultated_uah/(3600*10*(1000/emb_settings.period));
@@ -1051,7 +1067,7 @@ void user_activity(void) {
 
         if (emb_settings.show & SHOW_CURRENT) {
             vcdc_print("[CUR] ");
-            itoa(current/10, cur_str, 10);
+            itoa(DIV_ROUND_CLOSEST(current, 10), cur_str, 10);
             vcdc_print(cur_str);
             itoa(current % 10, cur_str, 10);
             vcdc_print(".");
@@ -1100,7 +1116,7 @@ void user_activity(void) {
             switch (display_mode) {
                 case 1:
                     /* maximum current  */
-                    value = current_max_ua/10;
+                    value = DIV_ROUND_CLOSEST(current_max_ua, 10);
                     lcdtext[0] = 'I';
                     precision = 0;
                     break;
