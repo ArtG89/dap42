@@ -38,7 +38,7 @@
 #include "USB/vcdc.h"
 #include "tic33m.h"
 
-#define ENABLE_DEBUG    (1)
+#define ENABLE_DEBUG    (0)
 
 #define FLASH_CONFIG_PAGE   31 /* last of 32 pages */
 #define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
@@ -47,7 +47,7 @@
 #define TIM2_PRESCALER_3US      75
 #define TIM2_PRESCALER_10US     225
 
-#define TIM2_PRESCALER          TIM2_PRESCALER_10US
+#define TIM2_PRESCALER          TIM2_PRESCALER_3US
 
 #define DMA_DATA_SIZE   200
 static volatile uint16_t dma_data[DMA_DATA_SIZE];
@@ -371,22 +371,29 @@ static void calibrate_voltage(uint32_t cal_value) {
 }
 
 void dma1_channel1_isr(void) {
+    /* using local variables for data processing */
+    uint32_t data = 0;
+    uint32_t range = current_power_range;
+    
     /* half transfer event */
     if ((DMA1_ISR & DMA_ISR_HTIF1) != 0) {
         DMA1_IFCR |= DMA_IFCR_CHTIF1;
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
-            adc_data.raw_current[current_power_range] += dma_data[i];
+            data += dma_data[i];
         }
-        adc_data.count[current_power_range] += DMA_DATA_SIZE/2;
+        adc_data.raw_current[range] += data;
+        adc_data.count[range] += DMA_DATA_SIZE/2;
     }
     
     /* transfer completed event */
     if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
         DMA1_IFCR |= DMA_IFCR_CTCIF1;
         for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
-            adc_data.raw_current[current_power_range] += dma_data[i];
+            data += dma_data[i];
+            
         }
-        adc_data.count[current_power_range] += DMA_DATA_SIZE/2;
+        adc_data.raw_current[range] += data;
+        adc_data.count[range] += DMA_DATA_SIZE/2;
     }
 }
 
@@ -399,16 +406,17 @@ void adc_comp_isr(void)
     ADC_ISR(ADC1) = ADC_ISR_AWD1;
         
     uint16_t adc_sample = ADC_DR(ADC1);
+    
+    /* using local variables for data processing */
+    int range = current_power_range;
+    int delta = 0;
 
-    if ((DMA_CNDTR(DMA1, DMA_CHANNEL1) < (DMA_DATA_SIZE - 10)) &&
-        ((adc_sample < CURRENT_LOWER_THRESHOLD)         ||
-         (adc_sample > CURRENT_HIGHER_THRESHOLD)))
+    while ((adc_sample < CURRENT_LOWER_THRESHOLD) ||
+           (adc_sample > CURRENT_HIGHER_THRESHOLD))
     {
-        int range = current_power_range;
-        
         if (adc_sample < CURRENT_LOWER_THRESHOLD) {
-            if (range != 0) {
-                if (range == 2) {
+            if ((range + delta) != 0) {
+                if ((range + delta) == 2) {
                     /* make-before-break! */
                     GPIO_BSRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                     GPIO_BRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
@@ -421,12 +429,11 @@ void adc_comp_isr(void)
                     GPIO_BSRR(CURRENT_RANGE0_PORT) = CURRENT_RANGE0_PIN;
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
-                current_power_range--;
+                delta--;
             }
-        }
-        else {        /* adc_sample > CURRENT_HIGHER_THRESHOLD */
-            if (range != 2) {
-                if (range == 0) {
+        } else {        /* adc_sample > CURRENT_HIGHER_THRESHOLD */
+            if ((range + delta) != 2) {
+                if ((range + delta) == 0) {
                     /* make-before-break! */
                     GPIO_BSRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                     GPIO_BRR(CURRENT_RANGE0_PORT) = CURRENT_RANGE0_PIN;
@@ -438,42 +445,50 @@ void adc_comp_isr(void)
                     GPIO_BSRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
-                current_power_range++;
+                delta++;
             } else {
                 led_act = 10;
             }
         }
         
-        uint16_t data[DMA_DATA_SIZE/2];
-        uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
-
-        /* copy data to temporary array to process them after acquisition restart */
-        if (data_number > DMA_DATA_SIZE/2) {
-            memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], DMA_DATA_SIZE);
-            data_number -= DMA_DATA_SIZE/2;
-        } else {
-            memcpy((void *)data, (void *)dma_data, DMA_DATA_SIZE);
+        if ((range + delta) == 1) {
+            /* restart data acquisition */
+            TIM_CR1(TIM2) |= TIM_CR1_CEN;
+            
+            /* check if another range correction is needed */
+            while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
+            TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
+            adc_sample = ADC_DR(ADC1);
         }
-
-        /* reset DMA channel */
-        DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
-        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
-        DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
-        
-        /* restart data acquisition */
-        TIM_CR1(TIM2) |= TIM_CR1_CEN;
-        
-        adc_data.count[range] += data_number;
-        
-        for (int i = 0; i < data_number; i++) {
-            adc_data.raw_current[range] += data[i];
-        }
-        
-        led_act = 2;
-    } else {
-        /* restart data acquisition */
-        TIM_CR1(TIM2) |= TIM_CR1_CEN;
     }
+        
+    uint16_t data[DMA_DATA_SIZE/2];
+    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
+
+    /* copy data to temporary array to process them after acquisition restart */
+    if (data_number > DMA_DATA_SIZE/2) {
+        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], DMA_DATA_SIZE);
+        data_number -= DMA_DATA_SIZE/2;
+    } else {
+        memcpy((void *)data, (void *)dma_data, DMA_DATA_SIZE);
+    }
+
+    /* reset DMA channel */
+    DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
+    DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+    DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
+    
+    current_power_range += delta;
+    
+    /* restart acquisition timer */
+    TIM_CR1(TIM2) |= TIM_CR1_CEN;
+    
+    uint32_t raw_data = 0;
+    for (int i = 0; i < data_number; i++) {
+        raw_data += data[i];
+    }
+    adc_data.raw_current[range] += raw_data;
+    adc_data.count[range] += data_number;
 }
 
 static int str_to_int(uint8_t *str) {

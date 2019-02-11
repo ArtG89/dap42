@@ -91,7 +91,7 @@
 #define TIC33M_LCLK_PORT        GPIOB
 #define TIC33M_LCLK_PIN         GPIO5
 
-#define CURRENT_LOWER_THRESHOLD     29
+#define CURRENT_LOWER_THRESHOLD     20
 #define CURRENT_HIGHER_THRESHOLD    3900
 
 #define FW_VERSION              "1.10"
