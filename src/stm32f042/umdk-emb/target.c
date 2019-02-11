@@ -531,19 +531,19 @@ static void console_command_parser(uint8_t *usb_command) {
 
     if (memcmp((char *)usb_command, "help", strlen("help")) == 0) {
         vcdc_println(help_period);
-        vcdc_send_buffer_space();
         vcdc_println(help_iface);
-        vcdc_send_buffer_space();
+        vcdc_app_update();
+        
         vcdc_println(help_power);
-        vcdc_send_buffer_space();
         vcdc_println(help_display);
-        vcdc_send_buffer_space();
+        vcdc_app_update();
+        
         vcdc_println(help_calibrate);
-        vcdc_send_buffer_space();
         vcdc_println(help_show);
-        vcdc_send_buffer_space();
+        vcdc_app_update();
+        
         vcdc_println(help_hide);
-        vcdc_send_buffer_space();
+        vcdc_app_update();
     }
     else
     if (memcmp((char *)usb_command, "period ", cmdlen = strlen("period ")) == 0) {
