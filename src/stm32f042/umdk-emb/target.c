@@ -38,14 +38,16 @@
 #include "USB/vcdc.h"
 #include "tic33m.h"
 
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 
 #define FLASH_CONFIG_PAGE   31 /* last of 32 pages */
 #define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
 #define FLASH_CONFIG_MAGIC  0xDEADF00D
 
-#define TIM2_PRESCALER_3US  75
-#define TIM2_PRESCALER_10US 225
+#define TIM2_PRESCALER_3US      75
+#define TIM2_PRESCALER_10US     225
+
+#define TIM2_PRESCALER          TIM2_PRESCALER_10US
 
 #define DMA_DATA_SIZE   200
 static volatile uint16_t dma_data[DMA_DATA_SIZE];
@@ -181,9 +183,14 @@ static void adc_setup_common(void) {
     ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
     adc_enable_watchdog_interrupt(ADC1);
     
-    /* needed for current measurements */
+    /* Analog watchdog interrupt */
+    nvic_set_priority(NVIC_ADC_COMP_IRQ, 0);
     nvic_enable_irq(NVIC_ADC_COMP_IRQ);
-    nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);    
+    
+    /* DMA interrupt with low priority */
+    nvic_set_priority(NVIC_DMA1_CHANNEL1_IRQ, 128);
+    nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);
+    
     rcc_periph_clock_enable(RCC_DMA1);
     
     /* overwrite data in case of overrun */
@@ -200,7 +207,7 @@ static void adc_measure_current(void) {
     adc_calibrate(ADC1);
     
     /* 1 us sampling time */
-    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_013DOT5);
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
     
     /* Measurements to be triggered by TIM2 */
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
@@ -211,23 +218,23 @@ static void adc_measure_current(void) {
 
     dma_channel_reset(DMA1, DMA_CHANNEL1);
     
-	/* Highest priority. */
-	dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
+    /* Medium priority. */
+    dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_MEDIUM);
 
-	/* ADC is 16 bit */
-	dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
-	dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
+    /* ADC is 16 bit */
+    dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
+    dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
 
-	dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
-	dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
+    dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
+    dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
     
     dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
     dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
     
-	dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
-	dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
-	dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
-	dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
+    dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
+    dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
+    dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
     dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
     
     dma_enable_channel(DMA1, DMA_CHANNEL1);
@@ -366,7 +373,7 @@ static void calibrate_voltage(uint32_t cal_value) {
 void dma1_channel1_isr(void) {
     /* half transfer event */
     if ((DMA1_ISR & DMA_ISR_HTIF1) != 0) {
-		DMA1_IFCR |= DMA_IFCR_CHTIF1;
+        DMA1_IFCR |= DMA_IFCR_CHTIF1;
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
             adc_data.raw_current[current_power_range] += dma_data[i];
         }
@@ -375,7 +382,7 @@ void dma1_channel1_isr(void) {
     
     /* transfer completed event */
     if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
-		DMA1_IFCR |= DMA_IFCR_CTCIF1;
+        DMA1_IFCR |= DMA_IFCR_CTCIF1;
         for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
             adc_data.raw_current[current_power_range] += dma_data[i];
         }
@@ -386,71 +393,87 @@ void dma1_channel1_isr(void) {
 /* analog watchdog interrupt */
 void adc_comp_isr(void)
 {
-    timer_disable_counter(TIM2);
-    adc_clear_watchdog_flag(ADC1);
-    dma_disable_channel(DMA1, DMA_CHANNEL1);
-
-    uint16_t data_number = DMA_DATA_SIZE - dma_get_number_of_data(DMA1, DMA_CHANNEL1);
+    /* stop ADC timer */
+    TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
+    /* reset ADC watchdog flag */
+    ADC_ISR(ADC1) = ADC_ISR_AWD1;
+        
     uint16_t adc_sample = ADC_DR(ADC1);
 
-    if ((adc_sample < CURRENT_LOWER_THRESHOLD) || (adc_sample > CURRENT_HIGHER_THRESHOLD)) {
-        led_act = 2;
+    if ((DMA_CNDTR(DMA1, DMA_CHANNEL1) < (DMA_DATA_SIZE - 10)) &&
+        ((adc_sample < CURRENT_LOWER_THRESHOLD)         ||
+         (adc_sample > CURRENT_HIGHER_THRESHOLD)))
+    {
+        int range = current_power_range;
         
-        int start = 0;
-        if (data_number > DMA_DATA_SIZE/2) {
-            start = DMA_DATA_SIZE/2;
-        } else {
-            start = 0;
-        }
-
-        adc_data.count[current_power_range] += (data_number - start);
-        
-        for (int i = start; i < data_number; i++) {
-            adc_data.raw_current[current_power_range] += dma_data[i];
-        }
-
         if (adc_sample < CURRENT_LOWER_THRESHOLD) {
-            if (current_power_range != 0) {
-                if (current_power_range == 2) {
+            if (range != 0) {
+                if (range == 2) {
                     /* make-before-break! */
-                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                    gpio_clear(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
+                    GPIO_BSRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
+                    GPIO_BRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
                 }
                 else { /* range 1 */
                     /* disable watchdog low threshold */
                     ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT);
                     
                     /* make-before-break! */
-                    gpio_set(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
-                    gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    GPIO_BSRR(CURRENT_RANGE0_PORT) = CURRENT_RANGE0_PIN;
+                    GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
                 current_power_range--;
             }
         }
         else {        /* adc_sample > CURRENT_HIGHER_THRESHOLD */
-            if (current_power_range != 2) {
-                if (current_power_range == 0) {
+            if (range != 2) {
+                if (range == 0) {
                     /* make-before-break! */
-                    gpio_set(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
-                    gpio_clear(CURRENT_RANGE0_PORT, CURRENT_RANGE0_PIN);
+                    GPIO_BSRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
+                    GPIO_BRR(CURRENT_RANGE0_PORT) = CURRENT_RANGE0_PIN;
 
                     /* reenable watchdog low threshold */
                     ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
                 } else {
                     /* make-before-break! */
-                    gpio_set(CURRENT_RANGE2_PORT, CURRENT_RANGE2_PIN);
-                    gpio_clear(CURRENT_RANGE1_PORT, CURRENT_RANGE1_PIN);
+                    GPIO_BSRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
+                    GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
                 current_power_range++;
             } else {
                 led_act = 10;
             }
         }
-    }
+        
+        uint16_t data[DMA_DATA_SIZE/2];
+        uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
 
-    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
-    dma_enable_channel(DMA1, DMA_CHANNEL1);
-    timer_enable_counter(TIM2);
+        /* copy data to temporary array to process them after acquisition restart */
+        if (data_number > DMA_DATA_SIZE/2) {
+            memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], DMA_DATA_SIZE);
+            data_number -= DMA_DATA_SIZE/2;
+        } else {
+            memcpy((void *)data, (void *)dma_data, DMA_DATA_SIZE);
+        }
+
+        /* reset DMA channel */
+        DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
+        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+        DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
+        
+        /* restart data acquisition */
+        TIM_CR1(TIM2) |= TIM_CR1_CEN;
+        
+        adc_data.count[range] += data_number;
+        
+        for (int i = 0; i < data_number; i++) {
+            adc_data.raw_current[range] += data[i];
+        }
+        
+        led_act = 2;
+    } else {
+        /* restart data acquisition */
+        TIM_CR1(TIM2) |= TIM_CR1_CEN;
+    }
 }
 
 static int str_to_int(uint8_t *str) {
@@ -596,6 +619,8 @@ void tim3_isr(void)
             vcdc_print("[INF] Period is ");
             vcdc_print(str);
             vcdc_println(" ms");
+            
+            vcdc_send_buffer_space();
         }
 
         /* calculate average ADC value */
@@ -976,7 +1001,7 @@ static void tim2_setup(void)
     rcc_periph_reset_pulse(RST_TIM2);
     timer_set_mode(TIM2, TIM_CR1_CKD_CK_INT, TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
     timer_set_period(TIM2, 1);
-    timer_set_prescaler(TIM2, TIM2_PRESCALER_3US);
+    timer_set_prescaler(TIM2, TIM2_PRESCALER);
     timer_set_clock_division(TIM2, 0x0);
     /* Generate TRGO on every update. */
     timer_set_master_mode(TIM2, TIM_CR2_MMS_UPDATE);
@@ -988,8 +1013,8 @@ static void tim3_setup(void)
     /* Enable TIM3 clock. */
     rcc_periph_clock_enable(RCC_TIM3);
 
-    /* TIM3 is a low priority interrupt */
-    nvic_set_priority(NVIC_TIM3_IRQ, 128);
+    /* TIM3 is a lowest priority interrupt */
+    nvic_set_priority(NVIC_TIM3_IRQ, 192);
     
     /* Enable TIM3 interrupt. */
     nvic_enable_irq(NVIC_TIM3_IRQ);

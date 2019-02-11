@@ -38,6 +38,9 @@ void console_setup(uint32_t baudrate) {
     usart_set_flow_control(CONSOLE_USART, USART_FLOWCONTROL_NONE);
 
     usart_enable(CONSOLE_USART);
+    
+    // Medium priority IRQ
+    nvic_set_priority(CONSOLE_USART_NVIC_LINE, 64);
     nvic_enable_irq(CONSOLE_USART_NVIC_LINE);
     rcc_periph_clock_enable(CONSOLE_RX_DMA_CLOCK);
 }
@@ -98,6 +101,7 @@ void console_reconfigure(uint32_t baudrate, uint32_t databits, uint32_t stopbits
     dma_enable_channel(CONSOLE_RX_DMA_CONTROLLER, CONSOLE_RX_DMA_CHANNEL);
 
     usart_enable_rx_dma(CONSOLE_USART);
+
     nvic_enable_irq(CONSOLE_USART_NVIC_LINE);
 
     // Re-enable the UART with the new settings
