@@ -211,23 +211,23 @@ static void adc_measure_current(void) {
 
     dma_channel_reset(DMA1, DMA_CHANNEL1);
     
-	/* Highest priority. */
-	dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
+    /* Highest priority. */
+    dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_VERY_HIGH);
 
-	/* ADC is 16 bit */
-	dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
-	dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
+    /* ADC is 16 bit */
+    dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
+    dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
 
-	dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
-	dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
+    dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
+    dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
     
     dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
     dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
     
-	dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
-	dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
-	dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
-	dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
+    dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
+    dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
+    dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
     dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
     
     dma_enable_channel(DMA1, DMA_CHANNEL1);
@@ -366,7 +366,7 @@ static void calibrate_voltage(uint32_t cal_value) {
 void dma1_channel1_isr(void) {
     /* half transfer event */
     if ((DMA1_ISR & DMA_ISR_HTIF1) != 0) {
-		DMA1_IFCR |= DMA_IFCR_CHTIF1;
+        DMA1_IFCR |= DMA_IFCR_CHTIF1;
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
             adc_data.raw_current[current_power_range] += dma_data[i];
         }
@@ -375,7 +375,7 @@ void dma1_channel1_isr(void) {
     
     /* transfer completed event */
     if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
-		DMA1_IFCR |= DMA_IFCR_CTCIF1;
+        DMA1_IFCR |= DMA_IFCR_CTCIF1;
         for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
             adc_data.raw_current[current_power_range] += dma_data[i];
         }
