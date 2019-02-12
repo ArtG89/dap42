@@ -522,18 +522,6 @@ void adc_comp_isr(void)
     adc_data.count[range] += data_number;
 }
 
-static int str_to_int(uint8_t *str) {
-    int  i = 0;
-    int num = 0;
-    
-    while ((str[i] >= '0') && (str[i] <= '9')) {
-        num = num * 10 + ( str[i] - '0' );
-        i++;
-    };
-
-    return num;
-}
-
 static void console_command_parser(uint8_t *usb_command) {
     const char *help_period = "period <ms> - set period in milliseconds, 10 to 1000";
     const char *help_iface = "iface <on|off> - enable/disable UART and SWD interfaces";
@@ -563,7 +551,7 @@ static void console_command_parser(uint8_t *usb_command) {
     }
     else
     if (memcmp((char *)usb_command, "period ", cmdlen = strlen("period ")) == 0) {
-        int period = str_to_int(&usb_command[cmdlen]);
+        int period = strtol((char *)&usb_command[cmdlen], NULL, 10);
 
         if ((period >= 10) && (period <= 1000)) {
             vcdc_print("[INF] Period is ");
@@ -615,11 +603,11 @@ static void console_command_parser(uint8_t *usb_command) {
     }
     else
     if (memcmp((char *)usb_command, "display ", cmdlen = strlen("display ")) == 0) {
-        display_mode = str_to_int(&usb_command[cmdlen]);
+        display_mode = strtol((char *)&usb_command[cmdlen], NULL, 10);
     }
     else
     if (memcmp((char *)usb_command, "calibrate ", cmdlen = strlen("calibrate ")) == 0) {
-        cal_voltage = str_to_int(&usb_command[cmdlen]);
+        cal_voltage = strtol((char *)&usb_command[cmdlen], NULL, 10);
         if ((cal_voltage > 0) && (cal_voltage < 20000)) {
             /* Enable DC/DC power */
             gpio_set(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
