@@ -206,8 +206,8 @@ extern void     DAP_Setup (void);
 #ifndef DELAY_SLOW_CYCLES
 #define DELAY_SLOW_CYCLES       3       // Number of cycles for one iteration
 #endif
-static inline __forceinline void PIN_DELAY_SLOW (uint32_t delay) {
-  int32_t count;
+static inline __forceinline __attribute__ void PIN_DELAY_SLOW (uint32_t delay) {
+  volatile uint32_t count;
 
   count = delay;
   while (--count);
