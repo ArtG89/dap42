@@ -432,7 +432,9 @@ void adc_comp_isr(void)
     /* stop ADC timer */
     TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
     /* reset ADC watchdog flag */
-    ADC_ISR(ADC1) = ADC_ISR_AWD1;
+    ADC_ISR(ADC1) |= ADC_ISR_AWD1;
+    /* disable DMA channel */
+    DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
         
     uint16_t adc_sample = ADC_DR(ADC1);
     
@@ -488,6 +490,12 @@ void adc_comp_isr(void)
             while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
             TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
             adc_sample = ADC_DR(ADC1);
+            
+            /* reset ADC watchdog flag */
+            ADC_ISR(ADC1) |= ADC_ISR_AWD1;
+
+            /* clear possible pending watchdog interrupt */
+            NVIC_ICPR(NVIC_ADC_COMP_IRQ / 32) = (1 << (NVIC_ADC_COMP_IRQ % 32));
         } else {
             break;
         }
@@ -498,14 +506,13 @@ void adc_comp_isr(void)
 
     /* copy data to temporary array to process them after acquisition restart */
     if (data_number > DMA_DATA_SIZE/2) {
-        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], DMA_DATA_SIZE);
+        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], data_number - DMA_DATA_SIZE/2);
         data_number -= DMA_DATA_SIZE/2;
     } else {
-        memcpy((void *)data, (void *)dma_data, DMA_DATA_SIZE);
+        memcpy((void *)data, (void *)dma_data, data_number);
     }
 
     /* reset DMA channel */
-    DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
     DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
     
