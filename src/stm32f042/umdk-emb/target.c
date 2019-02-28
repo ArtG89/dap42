@@ -506,10 +506,10 @@ void adc_comp_isr(void)
 
     /* copy data to temporary array to process them after acquisition restart */
     if (data_number > DMA_DATA_SIZE/2) {
-        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], data_number - DMA_DATA_SIZE/2);
+        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], sizeof(data[0])*(data_number - DMA_DATA_SIZE/2));
         data_number -= DMA_DATA_SIZE/2;
     } else {
-        memcpy((void *)data, (void *)dma_data, data_number);
+        memcpy((void *)data, (void *)dma_data, sizeof(data[0])*data_number);
     }
 
     /* reset DMA channel */
