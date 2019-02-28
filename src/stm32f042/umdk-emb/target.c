@@ -151,6 +151,7 @@ static volatile struct {
     uint32_t voltage_coeff;
     uint32_t period;
     uint32_t show;
+    uint32_t baudrate;
 } emb_settings;
 
 static void save_settings(void) {
@@ -537,6 +538,7 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_calibrate = "calibrate <mV> - calibrate voltage divider";
     const char *help_show = "show <SEC|VOL|CUR|AHR|WHR> - report values";
     const char *help_hide = "hide <SEC|VOL|CUR|AHR|WHR> - don't report values";
+    const char *help_baudrate = "baudrate <bps> - set target console baudrate";
 
     int cmdlen;
 
@@ -553,6 +555,7 @@ static void console_command_parser(uint8_t *usb_command) {
         vcdc_println(help_show);
         vcdc_app_update();
         
+        vcdc_println(help_baudrate);
         vcdc_println(help_hide);
         vcdc_app_update();
     }
@@ -572,6 +575,26 @@ static void console_command_parser(uint8_t *usb_command) {
         }
         else {
             vcdc_println(help_period);
+            vcdc_send_buffer_space();
+        }
+    }
+    if (memcmp((char *)usb_command, "baudrate ", cmdlen = strlen("baudrate ")) == 0) {
+        int baudrate = strtol((char *)&usb_command[cmdlen], NULL, 10);
+
+        if (baudrate != 0) {
+            vcdc_print("[INF] Baudrate is ");
+            char str[10];
+            itoa(baudrate, str, 10);
+            vcdc_print(str);
+            vcdc_println(" bps");
+            
+            console_reconfigure(baudrate, 8, USART_STOPBITS_1, USART_PARITY_NONE);
+            
+            emb_settings.baudrate = baudrate;
+            save_settings();
+        }
+        else {
+            vcdc_println(help_baudrate);
             vcdc_send_buffer_space();
         }
     }
@@ -834,7 +857,6 @@ void tim3_isr(void)
             gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
 #endif
             vcdc_println("[INF] target reset");
-            console_reconfigure(DEFAULT_BAUDRATE, 8, USART_STOPBITS_1, USART_PARITY_NONE);
         }
     }
     
@@ -1307,11 +1329,19 @@ void gpio_setup(void) {
     memcpy((void *)&emb_settings, (void *)FLASH_CONFIG_ADDR, sizeof(emb_settings));
     if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
         emb_settings.voltage_coeff = 0;
+        emb_settings.period = 100;
+        emb_settings.baudrate = DEFAULT_BAUDRATE;
     }
     
     if ((emb_settings.period < 10) || (emb_settings.period >= 1000)) {
         emb_settings.period = 100;
     }
+    
+    if ((emb_settings.baudrate == 0) || (emb_settings.baudrate > 1000000)) {
+        emb_settings.baudrate = DEFAULT_BAUDRATE;
+    }
+    
+    console_reconfigure(emb_settings.baudrate, 8, USART_STOPBITS_1, USART_PARITY_NONE);
     
     gpio_set_output_options(TIC33M_LCLK_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_HIGH, TIC33M_LCLK_PIN);
     gpio_mode_setup(TIC33M_LCLK_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, TIC33M_LCLK_PIN);
