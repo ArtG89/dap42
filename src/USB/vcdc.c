@@ -268,9 +268,10 @@ bool vcdc_app_update(void) {
 }
 
 void vcdc_putchar(const char c) {
-    if (!vcdc_tx_buffer_full()) {
-        vcdc_tx_buffer_put(c);
+    if (vcdc_tx_buffer_full()) {
+        vcdc_app_update();
     }
+    vcdc_tx_buffer_put(c);
 }
 
 void vcdc_print(const char* s) {
