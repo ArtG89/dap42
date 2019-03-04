@@ -405,7 +405,6 @@ void dma1_channel1_isr(void) {
     
     /* half transfer event */
     if ((DMA1_ISR & DMA_ISR_HTIF1) != 0) {
-        DMA1_IFCR |= DMA_IFCR_CHTIF1;
         for (int i = 0; i < DMA_DATA_SIZE/2; i++) {
             data += dma_data[i];
         }
@@ -416,7 +415,6 @@ void dma1_channel1_isr(void) {
     
     /* transfer completed event */
     if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
-        DMA1_IFCR |= DMA_IFCR_CTCIF1;
         for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
             data += dma_data[i];
             
@@ -425,6 +423,9 @@ void dma1_channel1_isr(void) {
         adc_data.raw_current[range] += data;
         adc_data.count[range] += 1;
     }
+    
+    /* clear DMA interrupt flags */
+    DMA1_IFCR |= DMA_IFCR_CGIF1;
 }
 
 /* analog watchdog interrupt */
@@ -478,8 +479,6 @@ void adc_comp_isr(void)
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
                 delta++;
-            } else {
-                led_act = 10;
             }
         }
         
@@ -515,11 +514,17 @@ void adc_comp_isr(void)
 
     /* reset DMA channel */
     DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+    
+    /* clear DMA interrupt flags */
+    DMA1_IFCR |= DMA_IFCR_CGIF1;
+
+    /* reenable DMA channel */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
     
     current_power_range += delta;
     
     /* restart acquisition timer */
+    TIM_CNT(TIM2) = 0;
     TIM_CR1(TIM2) |= TIM_CR1_CEN;
     
     uint32_t raw_data = 0;
