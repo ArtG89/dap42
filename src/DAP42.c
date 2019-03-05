@@ -132,7 +132,7 @@ int main(void) {
     tick_start();
 
     /* Enable the watchdog to enable DFU recovery from bad firmware images */
-    iwdg_set_period_ms(5000);
+    iwdg_set_period_ms(1000);
     iwdg_start();
 
     while (1) {
