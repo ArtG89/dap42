@@ -27,6 +27,7 @@
 #include <libopencm3/stm32/exti.h>
 #include <libopencm3/stm32/dma.h>
 
+#include <stdio.h>
 #include <string.h>
 
 #include "tick.h"
@@ -318,7 +319,7 @@ static void adc_measure_vdda(void) {
     adc_disable_vrefint();
     
     char vdda_str[5];
-    itoa(vdda, vdda_str, 10);
+    snprintf(vdda_str, 10, "%lu", vdda);
     vcdc_print("[VDD] ");
     vcdc_println(vdda_str);
 }
@@ -389,7 +390,7 @@ static void calibrate_voltage(uint32_t cal_value) {
     emb_settings.voltage_coeff = (100 * cal_value)/voltage_mv;
     
     char coeff_str[5];
-    itoa(emb_settings.voltage_coeff, coeff_str, 10);
+    snprintf(coeff_str, 10, "%lu", emb_settings.voltage_coeff);
     vcdc_print("[CAL] ");
     vcdc_println(coeff_str);
     
@@ -571,7 +572,7 @@ static void console_command_parser(uint8_t *usb_command) {
         if ((period >= 10) && (period <= 1000)) {
             vcdc_print("[INF] Period is ");
             char str[10];
-            itoa(period, str, 10);
+            snprintf(str, 10, "%d", period);
             vcdc_print(str);
             vcdc_println(" ms");
             
@@ -589,7 +590,7 @@ static void console_command_parser(uint8_t *usb_command) {
         if (baudrate != 0) {
             vcdc_print("[INF] Baudrate is ");
             char str[10];
-            itoa(baudrate, str, 10);
+            snprintf(str, 10, "%d", baudrate);
             vcdc_print(str);
             vcdc_println(" bps");
             
@@ -649,9 +650,8 @@ static void console_command_parser(uint8_t *usb_command) {
             /* delay before calibration 1500 ms */
             do_calibrate = 1500;
             
-            char str[10] = { };
-            strcpy(str, "CAL ");
-            itoa(cal_voltage, &str[strlen(str)], 10);
+            char str[20] = { };
+            snprintf(str, 20, "CAL %lu", cal_voltage);
             
             tic33m_display_string(&tic33m_dev, str, strlen(str));
             current_report_counter = 1;
@@ -803,13 +803,9 @@ void tim3_isr(void)
                 vcdc_println("[INF] Configuration loaded");
             }
             
-            char str[10];
-            itoa(emb_settings.period, str, 10);
-            vcdc_print("[INF] Period is ");
-            vcdc_print(str);
-            vcdc_println(" ms");
-            
-            vcdc_send_buffer_space();
+            char str[30];
+            snprintf(str, 30, "[INF] Period is %lu ms", emb_settings.period);
+            vcdc_println(str);
         }
 
         /* calculate average ADC value */
@@ -823,21 +819,17 @@ void tim3_isr(void)
                 if (adc_data.count[i]) {
                     adc_data.current[i] = (vdda * (DIV_ROUND_CLOSEST(10*adc_data.raw_current[i], adc_data.count[i]))) / 4095;
 #if ENABLE_DEBUG
-                    char str[10];
-                    vcdc_print("RAW ADC: ");
-                    itoa(i, str, 10);
+                    char str[30];
+                    snprintf(str, 30, "RAW ADC: %d: ", i);
                     vcdc_print(str);
-                    vcdc_print(": ");
                     
-                    itoa(adc_data.raw_current[i], str, 10);
+                    snprintf(str, 30, "%d / ", adc_data.raw_current[i]);
                     vcdc_print(str);
-                    vcdc_print(" / ");
 
-                    itoa(adc_data.count[i], str, 10);
+                    snprintf(str, 30, "%d = ", adc_data.count[i]);
                     vcdc_print(str);
-                    vcdc_print(" = ");
 
-                    itoa(DIV_ROUND_CLOSEST(adc_data.raw_current[i], adc_data.count[i]), str, 10);
+                    snprintf(str, 30, "%d", DIV_ROUND_CLOSEST(adc_data.raw_current[i], adc_data.count[i]));
                     vcdc_println(str);
 #endif
                 } else {
@@ -1037,7 +1029,7 @@ void user_activity(void) {
         disable_power();
     }
     
-    char cur_str[10] = { 0 };
+    char cur_str[30] = { 0 };
     
     if (cmd_int & CMD_INT_CONSOLEOUT) {
         cmd_int &= ~CMD_INT_CONSOLEOUT;
@@ -1076,52 +1068,34 @@ void user_activity(void) {
         energy_whr = energy_accumultated_uwh/(3600*10*(1000/emb_settings.period));
 
         if (emb_settings.show & SHOW_SECONDS) {
-            itoa(seconds_passed, cur_str, 10);
-            vcdc_print("[SEC] ");
+            snprintf(cur_str, 30, "[SEC] %lu", seconds_passed);
             vcdc_println(cur_str);
         }
         
         if (emb_settings.show & SHOW_VOLTAGE) {
-            itoa(adc_data.voltage, cur_str, 10);
-            vcdc_print("[VOL] ");
+            snprintf(cur_str, 30, "[VOL] %lu", adc_data.voltage);
             vcdc_println(cur_str);
         }
 
         if (emb_settings.show & SHOW_CURRENT) {
-            vcdc_print("[CUR] ");
-            itoa(DIV_ROUND_CLOSEST(current, 10), cur_str, 10);
-            vcdc_print(cur_str);
-            itoa(current % 10, cur_str, 10);
-            vcdc_print(".");
+            snprintf(cur_str, 30, "[CUR] %lu.%lu", DIV_ROUND_CLOSEST(current, 10), current % 10);
 #if ENABLE_DEBUG
             vcdc_print(cur_str);
 
-            itoa(adc_data.current[0], cur_str, 10);
-            vcdc_print(" (");
-            vcdc_print(cur_str);
-            
-            itoa(adc_data.current[1], cur_str, 10);
-            vcdc_print(" - ");
-            vcdc_print(cur_str);
-            
-            itoa(adc_data.current[2], cur_str, 10);
-            vcdc_print(" - ");
-            vcdc_print(cur_str);
-            vcdc_println(")");
+            snprintf(cur_str, 30, " (%lu - %lu - %lu)", adc_data.current[0], adc_data.current[1], adc_data.current[2]);
+            vcdc_println(cur_str);
 #else
             vcdc_println(cur_str);
 #endif
         }
         
         if (emb_settings.show & SHOW_AMPEREHOURS) {
-            itoa(energy_ahr, cur_str, 10);
-            vcdc_print("[AHR] ");
+            snprintf(cur_str, 30, "[AHR] %lu", energy_ahr);
             vcdc_println(cur_str);
         }
         
         if (emb_settings.show & SHOW_WATTHOURS) {
-            itoa(energy_whr, cur_str, 10);
-            vcdc_print("[WHR] ");
+            snprintf(cur_str, 30, "[WHR] %lu", energy_whr);
             vcdc_println(cur_str);
         }
     }
@@ -1156,7 +1130,7 @@ void user_activity(void) {
                     break;
             }
             
-            itoa(value, cur_str, 10);
+            snprintf(cur_str, 10, "%lu", value);
             int len = strlen(cur_str);
 
             if ((len > 8) || ((len > 7) && (precision > 0))) {
