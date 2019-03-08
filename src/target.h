@@ -21,6 +21,8 @@
 
 __attribute__((weak)) void user_activity(void);
 
+unsigned check_stack_size(void);
+
 extern void cpu_setup(void);
 extern void clock_setup(void);
 extern void gpio_setup(void);

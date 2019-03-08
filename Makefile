@@ -34,6 +34,7 @@ all: UMDK-EMB UMDK-RF DAP42 DAP42DC KITCHEN42 \
 clean:
 	$(Q)$(RM) $(BUILD_DIR)/*.bin
 	$(Q)$(MAKE) -C src/ clean
+	$(Q)$(MAKE) -C libopencm3/ clean
 
 .PHONY = all clean
 
@@ -41,6 +42,7 @@ $(BUILD_DIR):
 	$(Q)mkdir -p $(BUILD_DIR)
 	
 UMDK-RF: | $(BUILD_DIR)
+	@-patch --forward -r - -p0 < 0001-RAM-painting-for-stack-size-determination.patch
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ clean
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
@@ -49,6 +51,7 @@ UMDK-RF: | $(BUILD_DIR)
 	$(Q)$(SIZE) src/DAP42.elf
     
 UMDK-EMB: | $(BUILD_DIR)
+	@-patch --forward -r - -p0 < 0001-RAM-painting-for-stack-size-determination.patch
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/ clean
 	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/

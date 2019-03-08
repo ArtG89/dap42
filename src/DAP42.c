@@ -183,3 +183,19 @@ int main(void) {
 
     return 0;
 }
+
+#if defined(STACK_CANARY_WORD)
+#include <libopencm3/cm3/vector.h>
+
+unsigned check_stack_size(void) {
+    /* top of data section */
+    unsigned *addr = &_ebss;
+
+    /* look for the canary word till the end of RAM */
+    while ((addr < &_stack) && (*addr == STACK_CANARY_WORD)) {
+        addr++;
+    }
+    
+    return ((unsigned)&_stack - (unsigned)addr);
+}
+#endif
