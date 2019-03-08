@@ -24,9 +24,14 @@
 
 volatile uint32_t __ticks = 0;
 
+__attribute__((weak)) void systick_activity(void) {
+    /* do nothing */
+}
+
 void sys_tick_handler(void)
 {
     __ticks++;
+    systick_activity();
 }
 
 bool tick_setup(uint32_t tick_freq_hz) {
