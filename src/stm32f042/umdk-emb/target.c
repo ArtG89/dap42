@@ -746,7 +746,7 @@ static void console_command_parser(uint8_t *usb_command) {
 }
 
 /* ticks every 1 ms */
-void tim3_isr(void)
+void systick_activity(void)
 {
     current_report_counter++;
     
@@ -1180,53 +1180,6 @@ static void tim2_setup(void)
     timer_set_master_mode(TIM2, TIM_CR2_MMS_UPDATE);
 }
 
-/* starts button and data processing every 1 ms */
-static void tim3_setup(void)
-{
-    /* Enable TIM3 clock. */
-    rcc_periph_clock_enable(RCC_TIM3);
-
-    /* TIM3 is a lowest priority interrupt */
-    nvic_set_priority(NVIC_TIM3_IRQ, 192);
-    
-    /* Enable TIM3 interrupt. */
-    nvic_enable_irq(NVIC_TIM3_IRQ);
-
-    /* Reset TIM3 peripheral to defaults. */
-    rcc_periph_reset_pulse(RST_TIM3);
-
-    /* Timer global mode:
-     * - No divider
-     * - Alignment edge
-     * - Direction up
-     * (These are actually default values after reset above, so this call
-     * is strictly unnecessary, but demos the api for alternative settings)
-     */
-    timer_set_mode(TIM3, TIM_CR1_CKD_CK_INT,
-        TIM_CR1_CMS_EDGE, TIM_CR1_DIR_UP);
-
-    /*
-     * Sets the prescaler to have the timer run at 1kHz
-     */
-    timer_set_prescaler(TIM3, (rcc_apb1_frequency / 1000));
-
-    /* Disable preload. */
-    timer_disable_preload(TIM3);
-    timer_continuous_mode(TIM3);
-
-    /* count full range, as we'll update compare value continuously */
-    timer_set_period(TIM3, 65535);
-
-    /* Set the initial output compare value for OC1. */
-    timer_set_oc_value(TIM3, TIM_OC1, frequency);
-
-    /* Counter enable. */
-    timer_enable_counter(TIM3);
-
-    /* Enable Channel 1 compare interrupt to recalculate compare values */
-    timer_enable_irq(TIM3, TIM_DIER_CC1IE);
-}
-
 static void button_setup(void) {
     /* Set BOOT0 pin to an input */
     gpio_mode_setup(nBOOT0_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, nBOOT0_GPIO_PIN);
@@ -1300,8 +1253,7 @@ void gpio_setup(void) {
 
     /* Setup timers */
     tim2_setup();
-    tim3_setup();
-    
+
     /* Setup ADC */
     adc_setup_common();
     
