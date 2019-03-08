@@ -823,13 +823,13 @@ void systick_activity(void)
                     snprintf(str, 30, "RAW ADC: %d: ", i);
                     vcdc_print(str);
                     
-                    snprintf(str, 30, "%d / ", adc_data.raw_current[i]);
+                    snprintf(str, 30, "%lu / ", adc_data.raw_current[i]);
                     vcdc_print(str);
 
-                    snprintf(str, 30, "%d = ", adc_data.count[i]);
+                    snprintf(str, 30, "%lu = ", adc_data.count[i]);
                     vcdc_print(str);
 
-                    snprintf(str, 30, "%d", DIV_ROUND_CLOSEST(adc_data.raw_current[i], adc_data.count[i]));
+                    snprintf(str, 30, "%lu", DIV_ROUND_CLOSEST(adc_data.raw_current[i], adc_data.count[i]));
                     vcdc_println(str);
 #endif
                 } else {
@@ -1032,6 +1032,11 @@ void user_activity(void) {
     char cur_str[30] = { 0 };
     
     if (cmd_int & CMD_INT_CONSOLEOUT) {
+#if defined(STACK_CANARY_WORD) && ENABLE_DEBUG
+        snprintf(cur_str, 30, "[DEV] MSP %u bytes", check_stack_size());
+        vcdc_println(cur_str);
+#endif
+
         cmd_int &= ~CMD_INT_CONSOLEOUT;
 
         uint32_t current = 0;
