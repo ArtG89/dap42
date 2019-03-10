@@ -1193,11 +1193,6 @@ static void button_setup(void) {
     gpio_mode_setup(DISPLAY_MODE_BTN_PORT, GPIO_MODE_INPUT, GPIO_PUPD_PULLUP, DISPLAY_MODE_BTN_PIN);
 }
 
-#define FLASH_OBP_RDP 0x1FFFF800
-#define FLASH_OBP_RDP_KEY 0x55AA
-#define FLASH_OBP_USR 0x1FFFF802
-#define FLASH_OBP_USR_KEY 0x807F
-
 void gpio_setup(void) {
     /* Enable GPIO clocks. */
     rcc_periph_clock_enable(RCC_GPIOA);
