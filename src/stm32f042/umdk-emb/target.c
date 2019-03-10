@@ -545,26 +545,22 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_calibrate = "calibrate <mV> - calibrate voltage divider";
     const char *help_show = "show <SEC|VOL|CUR|AHR|WHR> - report values";
     const char *help_hide = "hide <SEC|VOL|CUR|AHR|WHR> - don't report values";
-    const char *help_baudrate = "baudrate <bps> - set target console baudrate";
+    const char *help_baudrate = "baudrate <bps> - set target UART baudrate";
 
     int cmdlen;
 
     if (memcmp((char *)usb_command, "help", strlen("help")) == 0) {
         vcdc_println(help_period);
         vcdc_println(help_iface);
-        vcdc_app_update();
-        
+
         vcdc_println(help_power);
         vcdc_println(help_display);
-        vcdc_app_update();
-        
+
         vcdc_println(help_calibrate);
         vcdc_println(help_show);
-        vcdc_app_update();
-        
-        vcdc_println(help_baudrate);
+
         vcdc_println(help_hide);
-        vcdc_app_update();
+        vcdc_println(help_baudrate);
     }
     else
     if (memcmp((char *)usb_command, "period ", cmdlen = strlen("period ")) == 0) {
