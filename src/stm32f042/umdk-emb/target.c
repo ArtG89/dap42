@@ -51,7 +51,7 @@
 #define TIM2_PRESCALER          TIM2_PRESCALER_3US
 
 #define DMA_DATA_SIZE   200
-static volatile uint16_t dma_data[DMA_DATA_SIZE];
+static uint16_t dma_data[DMA_DATA_SIZE];
 
 static tic33m tic33m_dev;
 
@@ -318,9 +318,8 @@ static void adc_measure_vdda(void) {
     /* Disable VREF */
     adc_disable_vrefint();
     
-    char vdda_str[5];
-    snprintf(vdda_str, 10, "%lu", vdda);
-    vcdc_print("[VDD] ");
+    char vdda_str[15];
+    snprintf(vdda_str, 15, "[VDD] %lu", vdda);
     vcdc_println(vdda_str);
 }
 
@@ -389,9 +388,8 @@ static void calibrate_voltage(uint32_t cal_value) {
     /* coeff is x10 for better accuracy */
     emb_settings.voltage_coeff = (100 * cal_value)/voltage_mv;
     
-    char coeff_str[5];
-    snprintf(coeff_str, 10, "%lu", emb_settings.voltage_coeff);
-    vcdc_print("[CAL] ");
+    char coeff_str[15];
+    snprintf(coeff_str, 15, "[CAL] %lu", emb_settings.voltage_coeff);
     vcdc_println(coeff_str);
     
     adc_power_off(ADC1);
@@ -418,7 +416,6 @@ void dma1_channel1_isr(void) {
     if ((DMA1_ISR & DMA_ISR_TCIF1) != 0) {
         for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
             data += dma_data[i];
-            
         }
         data = DIV_ROUND_CLOSEST(data, DMA_DATA_SIZE/2);
         adc_data.raw_current[range] += data;
@@ -501,37 +498,41 @@ void adc_comp_isr(void)
             break;
         }
     }
-        
-    uint16_t data[DMA_DATA_SIZE/2];
-    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
 
-    /* copy data to temporary array to process them after acquisition restart */
+    uint16_t *data;
+    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
+    uint32_t raw_data = 0;
+
     if (data_number > DMA_DATA_SIZE/2) {
-        memcpy((void *)data, (void *)&dma_data[DMA_DATA_SIZE/2], sizeof(data[0])*(data_number - DMA_DATA_SIZE/2));
+        data = &dma_data[DMA_DATA_SIZE/2];
         data_number -= DMA_DATA_SIZE/2;
+
+        /* reset DMA channel */
+        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
     } else {
-        memcpy((void *)data, (void *)dma_data, sizeof(data[0])*data_number);
+        data = dma_data;
+
+        /* reset DMA channel */
+        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE/2;
     }
 
-    /* reset DMA channel */
-    DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
-    
     /* clear DMA interrupt flags */
     DMA1_IFCR |= DMA_IFCR_CGIF1;
-
+    
     /* reenable DMA channel */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
-    
-    current_power_range += delta;
     
     /* restart acquisition timer */
     TIM_CNT(TIM2) = 0;
     TIM_CR1(TIM2) |= TIM_CR1_CEN;
     
-    uint32_t raw_data = 0;
+    current_power_range += delta;
+
+    /* process data */
     for (int i = 0; i < data_number; i++) {
         raw_data += data[i];
     }
+    
     adc_data.raw_current[range] += raw_data;
     adc_data.count[range] += data_number;
 }
@@ -1119,7 +1120,7 @@ void user_activity(void) {
                     /* maximum current  */
                     value = DIV_ROUND_CLOSEST(current_max_ua, 10);
                     lcdtext[0] = 'I';
-                    precision = 0;
+                    precision = 3;
                     break;
                 case 2:
                     /* microwatt-hours */
