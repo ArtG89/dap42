@@ -522,11 +522,11 @@ void adc_comp_isr(void)
     /* reenable DMA channel */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
     
+    current_power_range += delta;
+    
     /* restart acquisition timer */
     TIM_CNT(TIM2) = 0;
     TIM_CR1(TIM2) |= TIM_CR1_CEN;
-    
-    current_power_range += delta;
 
     /* process data */
     for (int i = 0; i < data_number; i++) {
