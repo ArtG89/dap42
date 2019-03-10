@@ -206,12 +206,6 @@ static void adc_setup_common(void) {
     
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
     
-    /* Enable analog watchdog on PB0 */
-    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
-    adc_enable_watchdog_interrupt(ADC1);
-    
     /* Analog watchdog interrupt */
     nvic_set_priority(NVIC_ADC_COMP_IRQ, 0);
     nvic_enable_irq(NVIC_ADC_COMP_IRQ);
@@ -244,6 +238,12 @@ static void adc_measure_current(void) {
     /* PB0 channel */
     uint8_t adc_channels = 8;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
+    
+    /* Enable analog watchdog on PB0 */
+    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
+    adc_enable_watchdog_interrupt(ADC1);
 
     dma_channel_reset(DMA1, DMA_CHANNEL1);
     
