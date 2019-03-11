@@ -47,6 +47,7 @@
 
 #define TIM2_PRESCALER_3US      75
 #define TIM2_PRESCALER_10US     225
+#define TIM2_PRESCALER_50US     1250
 
 #define TIM2_PRESCALER          TIM2_PRESCALER_3US
 
@@ -210,15 +211,39 @@ static void adc_setup_common(void) {
     
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
     
-    /* Analog watchdog interrupt */
+    /* Disable end of conversion IRQ */
+    adc_disable_eoc_interrupt(ADC1);
+    
+    /* Analog watchdog interrupt highest priority */
     nvic_set_priority(NVIC_ADC_COMP_IRQ, 0);
     nvic_enable_irq(NVIC_ADC_COMP_IRQ);
     
     /* DMA interrupt with low priority */
     nvic_set_priority(NVIC_DMA1_CHANNEL1_IRQ, 128);
     nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);
-    
+
     rcc_periph_clock_enable(RCC_DMA1);
+    
+    dma_channel_reset(DMA1, DMA_CHANNEL1);
+    
+    /* Medium priority. */
+    dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_MEDIUM);
+
+    /* ADC is 16 bit */
+    dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
+    dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
+
+    dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
+    dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
+    
+    dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
+    dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
+    
+    dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
+    dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
+    dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+    
+    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
     
     /* overwrite data in case of overrun */
     ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
@@ -249,27 +274,8 @@ static void adc_measure_current(void) {
     ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
     adc_enable_watchdog_interrupt(ADC1);
 
-    dma_channel_reset(DMA1, DMA_CHANNEL1);
-    
-    /* Medium priority. */
-    dma_set_priority(DMA1, DMA_CHANNEL1, DMA_CCR_PL_MEDIUM);
-
-    /* ADC is 16 bit */
-    dma_set_memory_size(DMA1, DMA_CHANNEL1, DMA_CCR_MSIZE_16BIT);
-    dma_set_peripheral_size(DMA1, DMA_CHANNEL1, DMA_CCR_PSIZE_16BIT);
-
-    dma_enable_memory_increment_mode(DMA1, DMA_CHANNEL1);
-    dma_disable_peripheral_increment_mode(DMA1, DMA_CHANNEL1);
-    
-    dma_enable_transfer_complete_interrupt(DMA1, DMA_CHANNEL1);
-    dma_enable_half_transfer_interrupt(DMA1, DMA_CHANNEL1);
-    
-    dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
-    dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
-    dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+    dma_disable_channel(DMA1, DMA_CHANNEL1);
     dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
-    dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
-    
     dma_enable_channel(DMA1, DMA_CHANNEL1);
 
     adc_enable_dma(ADC1);
@@ -297,9 +303,6 @@ static void adc_measure_vdda(void) {
     
     /* Enable VREF */
     adc_enable_vrefint();
-    
-    /* Disable IRQ */
-    adc_disable_eoc_interrupt(ADC1);
     
     /* VREF channel only */
     uint8_t adc_channels = 17;
@@ -336,9 +339,6 @@ static uint32_t adc_measure_voltage(void) {
     
     /* ADC will be run once */
     adc_disable_external_trigger_regular(ADC1);
-
-    /* Disable IRQ */
-    adc_disable_eoc_interrupt(ADC1);
     
     /* VREF channel only */
     uint8_t adc_channels = 9;
@@ -435,26 +435,37 @@ void adc_comp_isr(void)
 {
     /* stop ADC timer */
     TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
-    /* reset ADC watchdog flag */
-    ADC_ISR(ADC1) |= ADC_ISR_AWD1;
-    /* disable DMA channel */
-    DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
-        
+
     uint16_t adc_sample = ADC_DR(ADC1);
     
+    /* do not switch ranges if it was a short glitch or other ISR (should not happen) */
+    if (!(ADC_ISR(ADC1) & ADC_ISR_AWD1) || 
+       ((adc_sample > CURRENT_LOWER_THRESHOLD) && (adc_sample < CURRENT_HIGHER_THRESHOLD))) {
+        TIM_CR1(TIM2) |= TIM_CR1_CEN;
+        return;
+    }
+    
+    /* disable DMA channel */
+    DMA_CCR(DMA1, DMA_CHANNEL1) &= ~DMA_CCR_EN;
+
     /* using local variables for data processing */
     int range = current_power_range;
     int delta = 0;
-
-    while ((adc_sample < CURRENT_LOWER_THRESHOLD) ||
-           (adc_sample > CURRENT_HIGHER_THRESHOLD))
+    
+    while (ADC_ISR(ADC1) & ADC_ISR_AWD1)
     {
+        /* reset ADC watchdog flag */
+        ADC_ISR(ADC1) |= ADC_ISR_AWD1;
+        
         if (adc_sample < CURRENT_LOWER_THRESHOLD) {
             if ((range + delta) != 0) {
                 if ((range + delta) == 2) {
                     /* make-before-break! */
                     GPIO_BSRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                     GPIO_BRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
+                    
+                    /* reenable watchdog high threshold */
+                    ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
                 }
                 else { /* range 1 */
                     /* disable watchdog low threshold */
@@ -465,6 +476,8 @@ void adc_comp_isr(void)
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                 }
                 delta--;
+            } else { /* lowest range already */
+                
             }
         } else {        /* adc_sample > CURRENT_HIGHER_THRESHOLD */
             if ((range + delta) != 2) {
@@ -475,70 +488,72 @@ void adc_comp_isr(void)
 
                     /* reenable watchdog low threshold */
                     ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
-                } else {
+                } else {  /* range 2 */
                     /* make-before-break! */
                     GPIO_BSRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
+                    
+                    /* disable watchdog high threshold */
+                    ADC_TR1(ADC1) = (ADC_TR1(ADC1) |= ADC_TR1_HT);
                 }
                 delta++;
             }
         }
-        
         if ((range + delta) == 1) {
-            /* restart data acquisition */
+            /* restart data acquisition with small delay */
+            ADC_ISR(ADC1) |= ADC_ISR_EOC;
+            TIM_CNT(TIM2) = 0;
             TIM_CR1(TIM2) |= TIM_CR1_CEN;
             
-            /* check if another range correction is needed */
+            /* sample ADC to check if another correction is needed */
             while (!(ADC_ISR(ADC1) & ADC_ISR_EOC));
             TIM_CR1(TIM2) &= ~TIM_CR1_CEN;
-            adc_sample = ADC_DR(ADC1);
-            
-            /* reset ADC watchdog flag */
-            ADC_ISR(ADC1) |= ADC_ISR_AWD1;
-
-            /* clear possible pending watchdog interrupt */
-            NVIC_ICPR(NVIC_ADC_COMP_IRQ / 32) = (1 << (NVIC_ADC_COMP_IRQ % 32));
+            ADC_ISR(ADC1) |= ADC_ISR_EOC;
         } else {
             break;
         }
     }
 
-    uint16_t *data;
-    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
-    uint32_t raw_data = 0;
-
-    if (data_number > DMA_DATA_SIZE/2) {
-        data = &dma_data[DMA_DATA_SIZE/2];
-        data_number -= DMA_DATA_SIZE/2;
-
-        /* reset DMA channel */
-        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
-    } else {
-        data = dma_data;
-
-        /* reset DMA channel */
-        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE/2;
-    }
-
-    /* clear DMA interrupt flags */
-    DMA1_IFCR |= DMA_IFCR_CGIF1;
-    
-    /* reenable DMA channel */
-    DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
-    
     current_power_range += delta;
     
-    /* restart acquisition timer */
-    TIM_CNT(TIM2) = 0;
-    TIM_CR1(TIM2) |= TIM_CR1_CEN;
-
-    /* process data */
-    for (int i = 0; i < data_number; i++) {
-        raw_data += data[i];
-    }
+    uint32_t data = 0;
+    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
     
-    adc_data.raw_current[range] += raw_data;
-    adc_data.count[range] += data_number;
+    /* reset DMA channel data counter and interrupt flags */
+    DMA1_IFCR |= DMA_IFCR_CGIF1;
+    DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+    DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
+    
+    if (data_number > DMA_DATA_SIZE/2) {
+        /* restart acquisition, then process data */
+        TIM_CNT(TIM2) = 0;
+        TIM_CR1(TIM2) |= TIM_CR1_CEN;
+        
+        data_number -= DMA_DATA_SIZE/2;
+        for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
+            data += dma_data[i];
+        }
+        data = DIV_ROUND_CLOSEST(data, data_number);
+        adc_data.raw_current[range] += data;
+        adc_data.count[range] += 1;
+    } else {
+        /* process data, then restart acquisition */
+        if (data_number != 0) {
+            for (int i = 0; i < data_number; i++) {
+                data += dma_data[i];
+            }
+            data = DIV_ROUND_CLOSEST(data, data_number);
+            adc_data.raw_current[range] += data;
+            adc_data.count[range] += 1;
+        }
+        
+        /* restart acquisition timer */
+        TIM_CNT(TIM2) = 0;
+        TIM_CR1(TIM2) |= TIM_CR1_CEN;
+    }
+
+    /* clear possible pending watchdog interrupt */
+    NVIC_ICPR(NVIC_ADC_COMP_IRQ / 32) = (1 << (NVIC_ADC_COMP_IRQ % 32));
 }
 
 static void console_command_parser(uint8_t *usb_command) {
