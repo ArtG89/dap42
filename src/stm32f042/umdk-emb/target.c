@@ -172,6 +172,10 @@ static void disable_power(void) {
     /* Stop TIM2 */
     timer_disable_counter(TIM2);
     
+    /* disable DMA channel */
+    dma_disable_channel(DMA1, DMA_CHANNEL1);
+    adc_disable_dma(ADC1);
+    
     /* Stop ADC */
     adc_power_off(ADC1);
     
@@ -808,8 +812,11 @@ void systick_activity(void)
     if (current_report_counter &&  (current_report_counter % emb_settings.period == 0)) {
         /* calculate average ADC value */
         if (target_power_state && !target_start_measurements) {
-            /* measure voltage */
+            /* disable timer and DMA channel */
             timer_disable_counter(TIM2);
+            dma_disable_channel(DMA1, DMA_CHANNEL1);
+            adc_disable_dma(ADC1);
+            /* measure voltage */
             adc_data.voltage = adc_measure_voltage();
 
             /* convert to millivolts x10 */
