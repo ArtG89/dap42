@@ -780,33 +780,32 @@ void systick_activity(void)
         }
     }
     
+    /* only once 500 ms after start */
+    if ((!banner_displayed) && (current_report_counter == 500)) {
+        #if defined(BANNER_STR1)
+            vcdc_println(BANNER_STR1);
+        #endif
+        #if defined(BANNER_STR2)
+            vcdc_println(BANNER_STR2);
+        #endif
+        #if defined(BANNER_STR3)
+            vcdc_println(BANNER_STR3);
+        #endif
+        banner_displayed = true;
+        
+        if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
+            vcdc_println("[ERR] Configuration NOT loaded");
+        } else {
+            vcdc_println("[INF] Configuration loaded");
+        }
+        
+        char str[30];
+        snprintf(str, 30, "[INF] Period is %lu ms", emb_settings.period);
+        vcdc_println(str);
+    }
+    
     /* every 'emb_settings.period' ms */
     if (current_report_counter &&  (current_report_counter % emb_settings.period == 0)) {
-        
-        /* only once */
-        if (!banner_displayed) {
-            #if defined(BANNER_STR1)
-                vcdc_println(BANNER_STR1);
-            #endif
-            #if defined(BANNER_STR2)
-                vcdc_println(BANNER_STR2);
-            #endif
-            #if defined(BANNER_STR3)
-                vcdc_println(BANNER_STR3);
-            #endif
-            banner_displayed = true;
-            
-            if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
-                vcdc_println("[ERR] Configuration NOT loaded");
-            } else {
-                vcdc_println("[INF] Configuration loaded");
-            }
-            
-            char str[30];
-            snprintf(str, 30, "[INF] Period is %lu ms", emb_settings.period);
-            vcdc_println(str);
-        }
-
         /* calculate average ADC value */
         if (target_power_state && !target_start_measurements) {
             /* measure voltage */
