@@ -541,6 +541,7 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_period = "period <ms> - set period in milliseconds, 10 to 1000";
     const char *help_iface = "iface <on|off> - enable/disable UART and SWD interfaces";
     const char *help_power = "power <on|off> - enable/disable onboard DC/DC";
+    const char *help_maxreset = "maxreset - reset maximum current";
     const char *help_display = "display <N> - set display mode by number";
     const char *help_calibrate = "calibrate <mV> - calibrate voltage divider";
     const char *help_show = "show <SEC|VOL|CUR|AHR|WHR> - report values";
@@ -552,17 +553,18 @@ static void console_command_parser(uint8_t *usb_command) {
     if (memcmp((char *)usb_command, "help", strlen("help")) == 0) {
         vcdc_println(help_period);
         vcdc_println(help_iface);
-
         vcdc_println(help_power);
         vcdc_println(help_display);
-
+        vcdc_println(help_maxreset);
         vcdc_println(help_calibrate);
         vcdc_println(help_show);
-
         vcdc_println(help_hide);
         vcdc_println(help_baudrate);
     }
     else
+    if (memcmp((char *)usb_command, "maxreset", strlen("maxreset")) == 0) {
+        current_max_ua = 0;
+    }
     if (memcmp((char *)usb_command, "period ", cmdlen = strlen("period ")) == 0) {
         int period = strtol((char *)&usb_command[cmdlen], NULL, 10);
 
