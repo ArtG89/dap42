@@ -566,11 +566,15 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_show = "show <SEC|VOL|CUR|AHR|WHR> - report values";
     const char *help_hide = "hide <SEC|VOL|CUR|AHR|WHR> - don't report values";
     const char *help_baudrate = "baudrate <bps> - set target UART baudrate";
+    const char *help_reset = "reset - reset target";
+    const char *help_boot = "boot - switch target to bootloader mode";
 
     int cmdlen;
 
     if (memcmp((char *)usb_command, "help", strlen("help")) == 0) {
         vcdc_println(help_period);
+        vcdc_println(help_reset);
+        vcdc_println(help_boot);
         vcdc_println(help_iface);
         vcdc_println(help_power);
         vcdc_println(help_display);
@@ -658,6 +662,29 @@ static void console_command_parser(uint8_t *usb_command) {
     else
     if (memcmp((char *)usb_command, "display ", cmdlen = strlen("display ")) == 0) {
         display_mode = strtol((char *)&usb_command[cmdlen], NULL, 10);
+    }
+    else
+    if (memcmp((char *)usb_command, "reset ", cmdlen = strlen("reset ")) == 0) {
+        #if nRESET_GPIO_INVERT
+            gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+        #else
+            gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+        #endif
+        
+        target_release_reset = 100; /* 100 ms */
+    }
+    else
+    if (memcmp((char *)usb_command, "boot ", cmdlen = strlen("boot ")) == 0) {
+        #if nRESET_GPIO_INVERT
+            gpio_set(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+        #else
+            gpio_clear(nRESET_GPIO_PORT, nRESET_GPIO_PIN);
+        #endif
+        
+        gpio_clear(TARGET_BOOT_PORT, TARGET_BOOT_PIN); /* inverted */
+        
+        target_release_boot = 750; /* 750 ms */
+        target_release_reset = 100; /* 100 ms */
     }
     else
     if (memcmp((char *)usb_command, "calibrate ", cmdlen = strlen("calibrate ")) == 0) {

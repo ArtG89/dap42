@@ -95,6 +95,7 @@ CFLAGS      += -Os -g -std=gnu11
 CFLAGS      += -Wextra -Wshadow -Wimplicit-function-declaration
 CFLAGS      += -Wredundant-decls -Wmissing-prototypes -Wstrict-prototypes
 CFLAGS      += -fno-common -ffunction-sections -fdata-sections
+CFLAGS      += -fstack-usage
 
 ####################################################################
 # C++ flags
