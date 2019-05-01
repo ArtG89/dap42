@@ -563,8 +563,8 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_maxreset = "maxreset - reset maximum current";
     const char *help_display = "display <N> - set display mode by number";
     const char *help_calibrate = "calibrate <mV> - calibrate voltage divider";
-    const char *help_show = "show <SEC|VOL|CUR|AHR|WHR> - report values";
-    const char *help_hide = "hide <SEC|VOL|CUR|AHR|WHR> - don't report values";
+    const char *help_show = "show <SEC|VOL|CUR|AHR|WHR|all> - report values";
+    const char *help_hide = "hide <SEC|VOL|CUR|AHR|WHR|all> - don't report values";
     const char *help_baudrate = "baudrate <bps> - set target UART baudrate";
     const char *help_reset = "reset - reset target";
     const char *help_boot = "boot - switch target to bootloader mode";
@@ -706,7 +706,12 @@ static void console_command_parser(uint8_t *usb_command) {
     }
     else
     if (memcmp((char *)usb_command, "show ", cmdlen = strlen("show ")) == 0) {
-        if (memcmp((char *)&usb_command[cmdlen], "SEC", 2) == 0) {
+        if (memcmp((char *)&usb_command[cmdlen], "all", 3) == 0) {
+            emb_settings.show = 0xFF;
+            save_settings();
+        }
+        else
+        if (memcmp((char *)&usb_command[cmdlen], "SEC", 3) == 0) {
             if (!(emb_settings.show & SHOW_SECONDS)) {
                 emb_settings.show |= SHOW_SECONDS;
                 save_settings();
@@ -748,7 +753,12 @@ static void console_command_parser(uint8_t *usb_command) {
     }
     else
     if (memcmp((char *)usb_command, "hide ", cmdlen = strlen("hide ")) == 0) {
-        if (memcmp((char *)&usb_command[cmdlen], "SEC", 2) == 0) {
+        if (memcmp((char *)&usb_command[cmdlen], "all", 3) == 0) {
+            emb_settings.show = 0;
+            save_settings();
+        }
+        else
+        if (memcmp((char *)&usb_command[cmdlen], "SEC", 3) == 0) {
             if (emb_settings.show & SHOW_SECONDS) {
                 emb_settings.show &= ~SHOW_SECONDS;
                 save_settings();
