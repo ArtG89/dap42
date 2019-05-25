@@ -21,6 +21,7 @@
 
 #include <libopencm3/stm32/desig.h>
 #include <libopencm3/stm32/iwdg.h>
+#include <libopencm3/cm3/nvic.h>
 
 #include "config.h"
 #include "target.h"
@@ -71,6 +72,12 @@ static void on_dfu_request(void) {
     do_reset_to_dfu = true;
 }
 
+usbd_device* usbd_dev = NULL;
+
+void USB_IRQ_NAME(void) {
+    usbd_poll(usbd_dev);
+}
+
 int main(void) {
     if (DFU_AVAILABLE) {
         DFU_maybe_jump_to_bootloader();
@@ -105,7 +112,7 @@ int main(void) {
         cmp_set_usb_serial_number(serial);
     }
 
-    usbd_device* usbd_dev = cmp_usb_setup();
+    usbd_dev = cmp_usb_setup();
     DAP_app_setup(usbd_dev, &on_dfu_request);
 
     if (CDC_AVAILABLE) {
@@ -131,9 +138,11 @@ int main(void) {
     iwdg_set_period_ms(1000);
     iwdg_start();
 
+    /* Enable USB */
+    nvic_enable_irq(USB_NVIC_LINE);
+
     while (1) {
         iwdg_reset();
-        usbd_poll(usbd_dev);
 
         if (CDC_AVAILABLE) {
             cdc_uart_app_update();

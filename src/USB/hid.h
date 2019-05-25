@@ -29,5 +29,6 @@ extern void hid_setup(usbd_device* usbd_dev,
                       HostOutFunction report_recv_cb);
 
 extern bool hid_send_report(const uint8_t* report, size_t len);
+extern bool hid_get_in_ep_idle(void);
 
 #endif
