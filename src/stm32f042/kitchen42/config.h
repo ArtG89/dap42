@@ -22,6 +22,9 @@
 #define PRODUCT_NAME "DAP42C"
 #define REMAP_USB 0
 
+#define USB_NVIC_LINE NVIC_USB_IRQ
+#define USB_IRQ_NAME usb_isr
+
 #define CAN_RX_AVAILABLE 1
 #define CAN_TX_AVAILABLE 1
 #define CAN_NVIC_LINE NVIC_CEC_CAN_IRQ

@@ -21,6 +21,9 @@
 
 #define PRODUCT_NAME "DAP103"
 
+#define USB_NVIC_LINE NVIC_USB_LP_CAN_RX0_IRQ
+#define USB_IRQ_NAME usb_lp_can_rx0_isr
+
 #define CAN_RX_AVAILABLE 0
 #define CAN_TX_AVAILABLE 0
 
