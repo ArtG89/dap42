@@ -1348,9 +1348,9 @@ void gpio_setup(void) {
     
     int len = strlen(FW_VERSION);
     if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
-        tic33m_display_string(&tic33m_dev, "ERR   " FW_VERSION, 6 + len);
+        tic33m_display_string(&tic33m_dev, "ERR " FW_VERSION, 5 + len);
     } else {
-        tic33m_display_string(&tic33m_dev, "CAL   " FW_VERSION, 6 + len);
+        tic33m_display_string(&tic33m_dev, "CAL " FW_VERSION, 5 + len);
     }
 
     /* enable green LED */

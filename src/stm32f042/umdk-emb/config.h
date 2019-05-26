@@ -23,6 +23,9 @@
 #define PRODUCT_NAME "UMDK-RF/DAP42"
 #define REMAP_USB 1
 
+#define USB_NVIC_LINE NVIC_USB_IRQ
+#define USB_IRQ_NAME usb_isr
+
 #define CAN_RX_AVAILABLE 0
 #define CAN_TX_AVAILABLE 0
 #define CAN_NVIC_LINE NVIC_CEC_CAN_IRQ
@@ -94,7 +97,7 @@
 #define CURRENT_LOWER_THRESHOLD     20
 #define CURRENT_HIGHER_THRESHOLD    3900
 
-#define FW_VERSION              "1.20"
+#define FW_VERSION              "1.31.1"
 
 #define BANNER_STR1             "[INF] UMDK-ENERGYMON Energy Consumption Logger"
 #define BANNER_STR2             "[INF] (c) 2019 Unwired Devices LLC - www.unwds.com"
