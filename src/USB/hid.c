@@ -64,7 +64,6 @@ static HostOutFunction hid_report_out_callback = NULL;
 static HostInFunction hid_report_in_callback = NULL;
 
 static usbd_device* hid_usbd_dev = NULL;
-static volatile bool hid_in_ep_idle = true;
 
 static enum usbd_request_return_codes
 hid_control_standard_request(usbd_device *usbd_dev,
@@ -152,9 +151,6 @@ static void hid_interrupt_in(usbd_device *usbd_dev, uint8_t ep) {
         hid_report_in_callback(buf, &len);
         if (len > 0) {
             usbd_ep_write_packet(usbd_dev, ep, (const void*)buf, len);
-            hid_in_ep_idle = false;
-        } else {
-            hid_in_ep_idle = true;
         }
     }
 }
@@ -199,13 +195,5 @@ bool hid_send_report(const uint8_t* report, size_t len) {
     uint16_t sent = usbd_ep_write_packet(hid_usbd_dev, ENDP_HID_REPORT_IN,
                                          (const void*)report,
                                          (uint16_t)len);
-    if (sent != 0) {
-        hid_in_ep_idle = false;
-        return true;
-    }
-    return false;
-}
-
-bool hid_get_in_ep_idle(void) {
-    return hid_in_ep_idle;
+    return (sent != 0);
 }
