@@ -441,6 +441,9 @@ void adc_comp_isr(void)
     /* do not switch ranges if it was a short glitch or other ISR (should not happen) */
     if (!(ADC_ISR(ADC1) & ADC_ISR_AWD1) || 
        ((adc_sample > CURRENT_LOWER_THRESHOLD) && (adc_sample < CURRENT_HIGHER_THRESHOLD))) {
+        /* reset ADC watchdog flag */
+        ADC_ISR(ADC1) |= ADC_ISR_AWD1;
+        /* restart timer */
         TIM_CR1(TIM2) |= TIM_CR1_CEN;
         return;
     }
