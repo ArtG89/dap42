@@ -51,6 +51,8 @@
 
 #define TIM2_PRESCALER          TIM2_PRESCALER_3US
 
+#define ADC_SAMPLE_TIME         ADC_SMPTIME_007DOT5
+
 #define DMA_DATA_SIZE   200
 static uint16_t dma_data[DMA_DATA_SIZE];
 
@@ -200,20 +202,6 @@ static void adc_setup_common(void) {
     
     gpio_mode_setup(CURRENT_SENSE_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, CURRENT_SENSE_PIN);
     
-    /* stop any ongoing conversion */
-    ADC_CR(ADC1) = ADC_CR_ADSTP;
-    while (ADC_CR(ADC1) & ADC_CR_ADSTP) { }
-    
-    /* disable ADC */
-    adc_power_off(ADC1);
-    
-    /* calibration and clock source selection must be done with ADC disabled */   
-    adc_set_clk_source(ADC1, ADC_CLKSOURCE_ADC);
-    adc_calibrate(ADC1);
-    
-    /* enable ADC */
-    adc_power_on(ADC1);
-    
     adc_set_operation_mode(ADC1, ADC_MODE_SCAN);
     adc_disable_discontinuous_mode(ADC1);
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
@@ -224,7 +212,7 @@ static void adc_setup_common(void) {
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
     
     /* set 1 us sampling time */
-    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SAMPLE_TIME);
     
     /* Disable end of conversion IRQ */
     adc_disable_eoc_interrupt(ADC1);
@@ -312,6 +300,16 @@ static void adc_measure_vdda(void) {
     
     adc_disable_dma(ADC1);
     
+    /* disable ADC */
+    adc_power_off(ADC1);
+    
+    /* calibration and clock source selection must be done with ADC disabled */   
+    adc_set_clk_source(ADC1, ADC_CLKSOURCE_ADC);
+    adc_calibrate(ADC1);
+    
+    /* enable ADC */
+    adc_power_on(ADC1);
+    
     /* ~5 us sampling time */
     adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
     
@@ -345,7 +343,7 @@ static void adc_measure_vdda(void) {
     vcdc_println(vdda_str);
     
     /* set 1 us sampling time */
-    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SAMPLE_TIME);
 }
 
 static uint32_t adc_measure_voltage(void) {
@@ -1085,8 +1083,15 @@ void systick_activity(void)
     }
     
     /* every 2 seconds */
-    if (current_report_counter == 2000) {
+    if (current_report_counter && (current_report_counter % 2000 == 0)) {
         cmd_int |= CMD_INT_LCDOUT;
+    }
+    
+    /* every hour - ADC recalibration and VDDA measurement */
+    if (current_report_counter == 3600000) {
+        timer_disable_counter(TIM2);
+        adc_measure_vdda();
+        adc_measure_current();
         current_report_counter = 0;
     }
     
