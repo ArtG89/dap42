@@ -9,11 +9,16 @@ GTAGS
 *.o
 *.bin
 *.elf
+*.hex
+*.dfu
 *.axf
 *.map
 
 # ignore local makefile settings
 src/local.mk
+
+# ignore build directory
+build
 
 # Ignore macOS crap
 .DS_Store
