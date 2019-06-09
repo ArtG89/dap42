@@ -200,8 +200,20 @@ static void adc_setup_common(void) {
     
     gpio_mode_setup(CURRENT_SENSE_PORT, GPIO_MODE_ANALOG, GPIO_PUPD_NONE, CURRENT_SENSE_PIN);
     
+    /* stop any ongoing conversion */
+    ADC_CR(ADC1) = ADC_CR_ADSTP;
+    while (ADC_CR(ADC1) & ADC_CR_ADSTP) { }
+    
+    /* disable ADC */
+    adc_power_off(ADC1);
+    
+    /* calibration and clock source selection must be done with ADC disabled */   
     adc_set_clk_source(ADC1, ADC_CLKSOURCE_ADC);
     adc_calibrate(ADC1);
+    
+    /* enable ADC */
+    adc_power_on(ADC1);
+    
     adc_set_operation_mode(ADC1, ADC_MODE_SCAN);
     adc_disable_discontinuous_mode(ADC1);
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
@@ -211,16 +223,30 @@ static void adc_setup_common(void) {
     
     adc_set_resolution(ADC1, ADC_RESOLUTION_12BIT);
     
+    /* set 1 us sampling time */
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
+    
     /* Disable end of conversion IRQ */
     adc_disable_eoc_interrupt(ADC1);
+    
+    /* Enable VREF */
+    adc_enable_vrefint();
+    
+    /* Enable analog watchdog on PB0 */
+    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
+    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
     
     /* Analog watchdog interrupt highest priority */
     nvic_set_priority(NVIC_ADC_COMP_IRQ, 0);
     nvic_enable_irq(NVIC_ADC_COMP_IRQ);
     
-    /* DMA interrupt with low priority */
-    nvic_set_priority(NVIC_DMA1_CHANNEL1_IRQ, 128);
+    /* DMA interrupt with medium priority */
+    nvic_set_priority(NVIC_DMA1_CHANNEL1_IRQ, 64);
     nvic_enable_irq(NVIC_DMA1_CHANNEL1_IRQ);
+    
+    /* SysTick interrupt with low priority */
+    nvic_set_priority(NVIC_SYSTICK_IRQ, 128);
 
     rcc_periph_clock_enable(RCC_DMA1);
     
@@ -242,8 +268,11 @@ static void adc_setup_common(void) {
     dma_set_read_from_peripheral(DMA1, DMA_CHANNEL1);
     dma_set_peripheral_address(DMA1, DMA_CHANNEL1, (uint32_t)(&ADC1_DR));
     dma_set_memory_address(DMA1, DMA_CHANNEL1, (uint32_t)(dma_data));
+    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
     
     dma_enable_circular_mode(DMA1, DMA_CHANNEL1);
+    
+    dma_enable_channel(DMA1, DMA_CHANNEL1);
     
     /* overwrite data in case of overrun */
     ADC_CFGR1(ADC1) |= ADC_CFGR1_OVRMOD;
@@ -253,14 +282,10 @@ static void adc_setup_common(void) {
 }
 
 static void adc_measure_current(void) {
-    adc_power_off(ADC1);
-    
-    adc_disable_dma(ADC1);
-    adc_calibrate(ADC1);
-    
-    /* 1 us sampling time */
-    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
-    
+    /* stop any ongoing conversion */
+    ADC_CR(ADC1) = ADC_CR_ADSTP;
+    while (ADC_CR(ADC1) & ADC_CR_ADSTP) { }
+
     /* Measurements to be triggered by TIM2 */
     adc_enable_external_trigger_regular(ADC1, ADC_CFGR1_EXTSEL_VAL(2), ADC_CFGR1_EXTEN_RISING_EDGE);
     
@@ -268,18 +293,10 @@ static void adc_measure_current(void) {
     uint8_t adc_channels = 8;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
-    /* Enable analog watchdog on PB0 */
-    adc_enable_analog_watchdog_on_selected_channel(ADC1, 8);
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
-    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
+    /* Enable watchdog interrupt */
     adc_enable_watchdog_interrupt(ADC1);
 
-    dma_disable_channel(DMA1, DMA_CHANNEL1);
-    dma_set_number_of_data(DMA1, DMA_CHANNEL1, DMA_DATA_SIZE);
-    dma_enable_channel(DMA1, DMA_CHANNEL1);
-
     adc_enable_dma(ADC1);
-    adc_power_on(ADC1);
     
     /* start ADC measurements */
     adc_start_conversion_regular(ADC1);
@@ -289,11 +306,11 @@ static void adc_measure_current(void) {
 }
 
 static void adc_measure_vdda(void) {
-    adc_power_off(ADC1);
+    /* stop any ongoing conversion */
+    ADC_CR(ADC1) = ADC_CR_ADSTP;
+    while (ADC_CR(ADC1) & ADC_CR_ADSTP) { }
     
     adc_disable_dma(ADC1);
-    
-    adc_calibrate(ADC1);
     
     /* ~5 us sampling time */
     adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_071DOT5);
@@ -301,14 +318,15 @@ static void adc_measure_vdda(void) {
     /* ADC will be run once */
     adc_disable_external_trigger_regular(ADC1);
     
-    /* Enable VREF */
-    adc_enable_vrefint();
+    /* disable analog watchdog interrupt */
+    adc_disable_watchdog_interrupt(ADC1);
     
     /* VREF channel only */
     uint8_t adc_channels = 17;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
-    adc_power_on(ADC1);
+    /* discard old data if present */
+    adc_read_regular(ADC1);
     
     /* start ADC and wait for it to finish */
     adc_start_conversion_regular(ADC1);
@@ -322,43 +340,40 @@ static void adc_measure_vdda(void) {
     /* VDDA in millivolts */
     vdda = (3300 * cal_vref) / vdda;
     
-    /* Disable VREF */
-    adc_disable_vrefint();
-    
-    char vdda_str[15];
-    snprintf(vdda_str, 15, "[VDD] %lu", vdda);
+    char vdda_str[20];
+    snprintf(vdda_str, 20, "[VDD] %lu", vdda);
     vcdc_println(vdda_str);
+    
+    /* set 1 us sampling time */
+    adc_set_sample_time_on_all_channels(ADC1, ADC_SMPTIME_007DOT5);
 }
 
 static uint32_t adc_measure_voltage(void) {
-    adc_power_off(ADC1);
+    /* stop any ongoing conversion */
+    ADC_CR(ADC1) = ADC_CR_ADSTP;
+    while (ADC_CR(ADC1) & ADC_CR_ADSTP) { }
     
     adc_disable_dma(ADC1);
     
-    adc_calibrate(ADC1);
-    
     /* ADC will be run once */
     adc_disable_external_trigger_regular(ADC1);
+    
+    /* disable analog watchdog interrupt */
+    adc_disable_watchdog_interrupt(ADC1);
     
     /* VREF channel only */
     uint8_t adc_channels = 9;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
     
-    adc_power_on(ADC1);
-    
     /* discard old data if present */
-    uint32_t adc_read = adc_read_regular(ADC1);
-    
-    adc_read = 0;
-    
-    /* start ADC and wait for it to finish */
-    for (int i = 0; i < 5; i++) {
-        adc_start_conversion_regular(ADC1);
-        while (!(adc_eoc(ADC1)));
-        adc_read += adc_read_regular(ADC1);
-    }
+    adc_read_regular(ADC1);
 
-    uint32_t voltage = (emb_settings.voltage_coeff * vdda * adc_read) / (4095*10*5);
+    /* start ADC and wait for it to finish */
+    adc_start_conversion_regular(ADC1);
+    while (!(adc_eoc(ADC1)));
+    uint32_t adc_read = adc_read_regular(ADC1);
+
+    uint32_t voltage = (emb_settings.voltage_coeff * vdda * adc_read) / (4095*10);
     
     return voltage;
 }
@@ -369,8 +384,6 @@ static void calibrate_voltage(uint32_t cal_value) {
     /* PB1 channel only */
     uint8_t adc_channels = 9;
     adc_set_regular_sequence(ADC1, 1, &adc_channels);
-    
-    adc_power_on(ADC1);
     
     uint32_t voltage_mv = 0;
     
@@ -515,6 +528,12 @@ void adc_comp_isr(void)
         } else {
             break;
         }
+    }
+    
+    if (range + delta == 2) {
+        gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
+    } else {
+        gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     }
 
     current_power_range += delta;
@@ -868,7 +887,6 @@ void systick_activity(void)
         if (target_power_state && !target_start_measurements) {
             /* disable timer and DMA channel */
             timer_disable_counter(TIM2);
-            dma_disable_channel(DMA1, DMA_CHANNEL1);
             adc_disable_dma(ADC1);
             /* measure voltage */
             adc_data.voltage = adc_measure_voltage();
@@ -918,6 +936,12 @@ void systick_activity(void)
     
     if (target_start_measurements) {
         if (--target_start_measurements == 0) {
+            for (int i = 0; i < 3; i++) {
+                adc_data.raw_current[i] = 0;
+                adc_data.count[i] = 0;
+            }
+            
+            adc_setup_common();
             adc_measure_vdda();
             adc_measure_current();
         }
@@ -1312,9 +1336,6 @@ void gpio_setup(void) {
 
     /* Setup timers */
     tim2_setup();
-
-    /* Setup ADC */
-    adc_setup_common();
     
     memcpy((void *)&emb_settings, (void *)FLASH_CONFIG_ADDR, sizeof(emb_settings));
     if (emb_settings.magic != FLASH_CONFIG_MAGIC) {
