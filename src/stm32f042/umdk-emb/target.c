@@ -81,7 +81,7 @@ void cpu_setup(void) {
 void clock_setup(void) {
     rcc_clock_setup_in_hsi48_out_48mhz();
 
-    // Trim from USB sync frame
+    /* Trim from USB sync frame */
     crs_autotrim_usb_enable();
     rcc_set_usbclk_source(RCC_HSI48);
 }
@@ -518,41 +518,40 @@ void adc_comp_isr(void)
     }
 
     current_power_range += delta;
-    
+
     uint32_t data = 0;
-    uint16_t data_number = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
+    uint32_t start = 0;
+    uint32_t size = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
+    
+    if (size > DMA_DATA_SIZE/2) {
+        start = DMA_DATA_SIZE/2;
+        size -= start;
+        /* restart DMA at the buffer's first half */
+        /* while processing the second half below */
+        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+    } else {
+        /* restart DMA at the buffer's second half */
+        /* while processing the first half below   */
+        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE/2;
+    }
     
     /* reset DMA channel data counter and interrupt flags */
     DMA1_IFCR |= DMA_IFCR_CGIF1;
-    DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
+    /* reenable DMA channel */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
     
-    if (data_number > DMA_DATA_SIZE/2) {
-        /* restart acquisition, then process data */
-        TIM_CNT(TIM2) = 0;
-        TIM_CR1(TIM2) |= TIM_CR1_CEN;
-        
-        data_number -= DMA_DATA_SIZE/2;
-        for (int i = DMA_DATA_SIZE/2; i < DMA_DATA_SIZE; i++) {
-            data += dma_data[i];
+    /* restart acquisition timer */
+    TIM_CNT(TIM2) = 0;
+    TIM_CR1(TIM2) |= TIM_CR1_CEN;
+
+    if (size) {
+        for (uint32_t i = 0; i < size; i++) {
+            data += dma_data[start + i];
         }
-        data = DIV_ROUND_CLOSEST(data, data_number);
+
+        data = DIV_ROUND_CLOSEST(data, size);
         adc_data.raw_current[range] += data;
         adc_data.count[range] += 1;
-    } else {
-        /* process data, then restart acquisition */
-        if (data_number != 0) {
-            for (int i = 0; i < data_number; i++) {
-                data += dma_data[i];
-            }
-            data = DIV_ROUND_CLOSEST(data, data_number);
-            adc_data.raw_current[range] += data;
-            adc_data.count[range] += 1;
-        }
-        
-        /* restart acquisition timer */
-        TIM_CNT(TIM2) = 0;
-        TIM_CR1(TIM2) |= TIM_CR1_CEN;
     }
 
     /* clear possible pending watchdog interrupt */
