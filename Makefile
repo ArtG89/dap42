@@ -22,9 +22,9 @@ MAKE		   := $(MAKE) --no-print-directory
 endif
 export V
 
-BUILD_DIR	  ?= ./build
+FORMATS ?= hex dfu
 
-SIZE           = arm-none-eabi-size
+BUILD_DIR	  ?= ./build
 
 all: DAP42 UMDK-EMB UMDK-RF DAP42DC KITCHEN42 \
 	 DAP103 DAP103-DFU \
@@ -42,83 +42,66 @@ $(BUILD_DIR):
 	$(Q)mkdir -p $(BUILD_DIR)
 	
 UMDK-RF: | $(BUILD_DIR)
-	@-patch --forward -r - -p0 < 0001-RAM-painting-for-stack-size-determination.patch
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ clean
-	$(Q)$(MAKE) TARGET=UMDK-RF -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
-    
+	$(Q)$(MAKE) TARGET=UMDK-RF -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
+	
 UMDK-EMB: | $(BUILD_DIR)
-	@-patch --forward -r - -p0 < 0001-RAM-painting-for-stack-size-determination.patch
 	@printf "  BUILD $(@)\n"
-	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/ clean
-	$(Q)$(MAKE) TARGET=UMDK-EMB -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=$(@) -C src/ clean
+	$(Q)$(MAKE) TARGET=$(@) -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F042 -C src/ clean
-	$(Q)$(MAKE) TARGET=STM32F042 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=STM32F042 -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP42DC: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42DC -C src/ clean
-	$(Q)$(MAKE) TARGET=DAP42DC -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=DAP42DC -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 KITCHEN42: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/ clean
-	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=KITCHEN42 -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP103: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103 -C src/ clean
-	$(Q)$(MAKE) TARGET=STM32F103 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=STM32F103 -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP103-DFU: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/ clean
-	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=STM32F103-DFUBOOT -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 BRAINv3.3: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/ clean
-	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=BRAINV3.3 -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP42K6U: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=DAP42K6U -C src/ clean
-	$(Q)$(MAKE) TARGET=DAP42K6U -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=DAP42K6U -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
 
 DAP103-NUCLEO-STBOOT: | $(BUILD_DIR)
 	@printf "  BUILD $(@)\n"
 	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/ clean
-	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/
-	$(Q)cp src/DAP42.bin $(BUILD_DIR)/$(@).bin
-	$(Q)elf2dfuse src/DAP42.elf $(BUILD_DIR)/$(@).dfu
-	$(Q)$(SIZE) src/DAP42.elf
+	$(Q)$(MAKE) TARGET=STLINKV2-1-STBOOT -C src/ $(FORMATS)
+	$(Q)$(MAKE) TARGET=$(@) copy
+
+copy:
+	$(Q)cp src/DAP42.hex $(BUILD_DIR)/$(TARGET).hex
+	$(Q)cp src/DAP42.dfu $(BUILD_DIR)/$(TARGET).dfu
+	$(Q)$(MAKE) TARGET=$(TARGET) -C src/ size

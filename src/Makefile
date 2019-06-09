@@ -18,6 +18,7 @@
 
 BINARY          = DAP42
 OPENCM3_DIR     = ../libopencm3
+UTIL_DIR        = ../util
 
 TARGET         ?= STM32F042
 include targets.mk
@@ -49,8 +50,15 @@ dfuse-flash: $(BINARY).dfuse-flash
 
 dfu-flash: $(BINARY).dfu-flash
 
-size: $(OBJS) $(BINARY).elf
-	@$(PREFIX)-size $(OBJS) $(BINARY).elf
+dfu: $(BINARY).hex
+	@echo "Building hex2dfu util"
+	@make -C $(UTIL_DIR)/hex2dfu
+	@echo "Converting HEX to DFU"
+	@$(UTIL_DIR)/hex2dfu/hex2dfu -i $(BINARY).hex -o $(BINARY).dfu
+
+size: $(BINARY).elf
+	@echo "Firmware size:"
+	@$(PREFIX)-size $(BINARY).elf
 
 debug: $(BINARY).elf
 	-$(GDB) --tui --eval "target remote | $(OOCD) -f $(OOCD_INTERFACE) -f $(OOCD_BOARD) -f ../openocd/debug.cfg" $(BINARY).elf
@@ -61,6 +69,7 @@ reset:
 clean::
 	@rm -f $(OBJS)
 	@rm -f $(DEPS)
+	@rm -f $(BINARY).dfu
 
 SRCS           := $(wildcard *.c)
 SRCS           += $(wildcard DAP/*.c)
