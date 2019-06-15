@@ -479,10 +479,10 @@ void adc_comp_isr(void)
                     GPIO_BRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
                     
                     /* reenable watchdog high threshold */
-                    ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
+                    ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_HT) | ADC_TR1_HT_VAL(CURRENT_HIGHER_THRESHOLD);
                 }
                 else { /* range 1 */
-                    /* disable watchdog low threshold */
+                    /* disable watchdog low threshold by setting it to 0 */
                     ADC_TR1(ADC1) = (ADC_TR1(ADC1) & ~ADC_TR1_LT);
                     
                     /* make-before-break! */
@@ -501,14 +501,14 @@ void adc_comp_isr(void)
                     GPIO_BRR(CURRENT_RANGE0_PORT) = CURRENT_RANGE0_PIN;
 
                     /* reenable watchdog low threshold */
-                    ADC_TR1(ADC1) |= (ADC_TR1(ADC1) & ~ADC_TR1_LT) | ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
+                    ADC_TR1(ADC1) |= ADC_TR1_LT_VAL(CURRENT_LOWER_THRESHOLD);
                 } else {  /* range 2 */
                     /* make-before-break! */
                     GPIO_BSRR(CURRENT_RANGE2_PORT) = CURRENT_RANGE2_PIN;
                     GPIO_BRR(CURRENT_RANGE1_PORT) = CURRENT_RANGE1_PIN;
                     
-                    /* disable watchdog high threshold */
-                    ADC_TR1(ADC1) = (ADC_TR1(ADC1) |= ADC_TR1_HT);
+                    /* disable watchdog high threshold by setting it to maximum */
+                    ADC_TR1(ADC1) |= ADC_TR1_HT;
                 }
                 delta++;
             }
@@ -527,7 +527,7 @@ void adc_comp_isr(void)
             break;
         }
     }
-    
+
     if (range + delta == 2) {
         gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
     } else {
