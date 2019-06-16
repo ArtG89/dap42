@@ -160,6 +160,7 @@ $(LDSCRIPT):
 $(OPENCM3_DIR)/Makefile:
 	$(Q)git submodule update --init $(OPENCM3_DIR)
 	$(Q)patch --forward -d../ -r - -p0 < ../0001-RAM-painting-for-stack-size-determination.patch
+	$(Q)patch --forward -d../ -r - -p0 < ../0002-fix-ADC-power-on-after-ADC-calibration.patch
 
 $(LIB_DIR)/lib$(LIBNAME).a: $(OPENCM3_DIR)/Makefile
 	$(Q)$(MAKE) -C $(OPENCM3_DIR) TARGETS=$(LOCM3_TARGET)
