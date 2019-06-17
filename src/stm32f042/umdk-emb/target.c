@@ -39,7 +39,7 @@
 #include "USB/vcdc.h"
 #include "tic33m.h"
 
-#define ENABLE_DEBUG    (0)
+#define ENABLE_DEBUG    (1)
 
 #define FLASH_CONFIG_PAGE   31 /* last of 32 pages */
 #define FLASH_CONFIG_ADDR   (FLASH_BASE + 1024*FLASH_CONFIG_PAGE)
@@ -53,7 +53,7 @@
 
 #define ADC_SAMPLE_TIME         ADC_SMPTIME_007DOT5
 
-#define DMA_DATA_SIZE   200
+#define DMA_DATA_SIZE           200
 static uint16_t dma_data[DMA_DATA_SIZE];
 
 static tic33m tic33m_dev;
