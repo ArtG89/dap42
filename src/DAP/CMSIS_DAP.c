@@ -206,6 +206,9 @@ static uint32_t DAP_HostStatus(uint8_t *request, uint8_t *response) {
   return (1);
 }
 
+__attribute__((weak)) void DAP_On_Connect(void) {
+    /* do nothing */
+}
 
 // Process Connect command and prepare response
 //   request:  pointer to request data
@@ -239,7 +242,14 @@ static uint32_t DAP_Connect(uint8_t *request, uint8_t *response) {
   }
 
   *response = port;
+  
+  DAP_On_Connect();
+  
   return (1);
+}
+
+__attribute__((weak)) void DAP_On_Disconnect(void) {
+    /* do nothing */
 }
 
 
@@ -253,6 +263,9 @@ static uint32_t DAP_Disconnect(uint8_t *response) {
   PORT_OFF();
 
   *response = DAP_OK;
+  
+  DAP_On_Disconnect();
+  
   return (1);
 }
 

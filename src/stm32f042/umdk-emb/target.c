@@ -35,6 +35,7 @@
 #include "config.h"
 #include "console.h"
 #include "DAP/CMSIS_DAP_config.h"
+#include "DAP/CMSIS_DAP.h"
 #include "DFU/DFU.h"
 #include "USB/vcdc.h"
 #include "tic33m.h"
@@ -125,6 +126,7 @@ static uint32_t do_calibrate = 0;
 static volatile uint32_t cal_voltage = 0;
 static volatile int current_power_range = 0;
 static volatile uint8_t cmd_int = 0;
+static volatile bool dap_connected = false;
 
 #define USB_COMMAND_SIZE    20
 
@@ -156,6 +158,7 @@ static volatile struct {
     uint32_t period;
     uint32_t show;
     uint32_t baudrate;
+    uint32_t dap_active;
 } emb_settings;
 
 static void save_settings(void) {
@@ -169,6 +172,24 @@ static void save_settings(void) {
     }
     flash_lock();
     vcdc_println("[INF] Settings saved");
+}
+
+/* stop measurements on DAP connect */
+void DAP_On_Connect(void) {
+    vcdc_println("[INF] DAP connect");
+    if (!emb_settings.dap_active) {
+        dap_connected = true;
+        timer_disable_counter(TIM2);
+    }
+}
+
+/* restart measurements on DAP connect */
+void DAP_On_Disconnect(void) {
+    vcdc_println("[INF] DAP disconnect");
+    if (!emb_settings.dap_active) {
+        dap_connected = false;
+        timer_enable_counter(TIM2);
+    }
 }
 
 static void disable_power(void) {
@@ -590,6 +611,7 @@ static void console_command_parser(uint8_t *usb_command) {
     const char *help_baudrate = "baudrate <bps> - set target UART baudrate";
     const char *help_reset = "reset - reset target";
     const char *help_boot = "boot - switch target to bootloader mode";
+    const char *help_dap = "dap <on|off> - stop current measurements when DAP is active";
 
     int cmdlen;
 
@@ -605,6 +627,7 @@ static void console_command_parser(uint8_t *usb_command) {
         vcdc_println(help_show);
         vcdc_println(help_hide);
         vcdc_println(help_baudrate);
+        vcdc_println(help_dap);
     }
     else
     if (memcmp((char *)usb_command, "maxreset", strlen("maxreset")) == 0) {
@@ -660,6 +683,21 @@ static void console_command_parser(uint8_t *usb_command) {
         if (memcmp((char *)&usb_command[cmdlen], "off", 3) == 0) {
             is_interface_connected = true;
             button2_counter = 100;
+        }
+        else {
+            vcdc_println(help_iface);
+            vcdc_send_buffer_space();
+        }
+    }
+    if (memcmp((char *)usb_command, "dap ", cmdlen = strlen("dap ")) == 0) {
+        if (memcmp((char *)&usb_command[cmdlen], "on", 2) == 0) {
+            emb_settings.dap_active = 1;
+            save_settings();
+        }
+        else
+        if (memcmp((char *)&usb_command[cmdlen], "off", 3) == 0) {
+            emb_settings.dap_active = 0;
+            save_settings();
         }
         else {
             vcdc_println(help_iface);
@@ -885,7 +923,9 @@ void systick_activity(void)
     }
     
     /* every 'emb_settings.period' ms */
-    if (current_report_counter &&  (current_report_counter % emb_settings.period == 0)) {
+    if (current_report_counter &&
+       (current_report_counter % emb_settings.period == 0) &&
+        !dap_connected) {
         /* calculate average ADC value */
         if (target_power_state && !target_start_measurements) {
             /* disable timer and DMA channel */
@@ -1352,6 +1392,7 @@ void gpio_setup(void) {
         emb_settings.voltage_coeff = 0;
         emb_settings.period = 100;
         emb_settings.baudrate = DEFAULT_BAUDRATE;
+        emb_settings.dap_active = 1;
     }
     
     if ((emb_settings.period < 10) || (emb_settings.period >= 1000)) {

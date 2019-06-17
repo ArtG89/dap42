@@ -229,5 +229,8 @@ static inline __forceinline void PIN_DELAY_FAST (void) {
 #endif
 }
 
+__attribute__((weak)) void DAP_On_Connect(void);
+__attribute__((weak)) void DAP_On_Disconnect(void);
+
 
 #endif  /* __DAP_H__ */
