@@ -537,42 +537,45 @@ void adc_comp_isr(void)
     current_power_range += delta;
 
     uint32_t data = 0;
-    uint32_t start = 0;
     uint32_t size = DMA_DATA_SIZE - DMA_CNDTR(DMA1, DMA_CHANNEL1);
     
-    if (size > DMA_DATA_SIZE/2) {
-        start = DMA_DATA_SIZE/2;
-        size -= start;
-        /* restart DMA at the buffer's first half */
-        /* while processing the second half below */
-        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
-    } else {
-        /* restart DMA at the buffer's second half */
-        /* while processing the first half below   */
-        DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE/2;
+    /* copy data to temporary array if needed */
+    uint16_t data_tmp[DMA_DATA_SIZE/2];
+    uint16_t *data_ptr;
+
+    if (size) {
+        if (size > DMA_DATA_SIZE/2) {
+            size -= DMA_DATA_SIZE/2;
+            data_ptr = &dma_data[DMA_DATA_SIZE/2];
+        } else {
+            data_ptr = data_tmp;
+            memcpy((void *)data_ptr, (void *)dma_data, size * sizeof(uint16_t));
+        }
     }
     
     /* reset DMA channel data counter and interrupt flags */
+    DMA_CNDTR(DMA1, DMA_CHANNEL1) = DMA_DATA_SIZE;
     DMA1_IFCR |= DMA_IFCR_CGIF1;
     /* reenable DMA channel */
     DMA_CCR(DMA1, DMA_CHANNEL1) |= DMA_CCR_EN;
-    
+
     /* restart acquisition timer */
     TIM_CNT(TIM2) = 0;
     TIM_CR1(TIM2) |= TIM_CR1_CEN;
 
+    /* clear possible pending watchdog interrupt */
+    NVIC_ICPR(NVIC_ADC_COMP_IRQ / 32) = (1 << (NVIC_ADC_COMP_IRQ % 32));
+
+    /* process data */
     if (size) {
         for (uint32_t i = 0; i < size; i++) {
-            data += dma_data[start + i];
+            data += data_ptr[i];
         }
 
         data = DIV_ROUND_CLOSEST(data, size);
         adc_data.raw_current[range] += data;
         adc_data.count[range] += 1;
     }
-
-    /* clear possible pending watchdog interrupt */
-    NVIC_ICPR(NVIC_ADC_COMP_IRQ / 32) = (1 << (NVIC_ADC_COMP_IRQ % 32));
 }
 
 static void console_command_parser(uint8_t *usb_command) {
@@ -607,6 +610,7 @@ static void console_command_parser(uint8_t *usb_command) {
     if (memcmp((char *)usb_command, "maxreset", strlen("maxreset")) == 0) {
         current_max_ua = 0;
     }
+    else
     if (memcmp((char *)usb_command, "period ", cmdlen = strlen("period ")) == 0) {
         int period = strtol((char *)&usb_command[cmdlen], NULL, 10);
 
@@ -625,6 +629,7 @@ static void console_command_parser(uint8_t *usb_command) {
             vcdc_send_buffer_space();
         }
     }
+    else
     if (memcmp((char *)usb_command, "baudrate ", cmdlen = strlen("baudrate ")) == 0) {
         int baudrate = strtol((char *)&usb_command[cmdlen], NULL, 10);
 
