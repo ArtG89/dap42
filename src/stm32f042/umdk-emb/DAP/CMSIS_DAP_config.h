@@ -142,9 +142,16 @@ Provides definitions about:
 #define LED_RUN_GPIO_PIN        GPIO13 /* PA13 */
 #define LED_RUN_DISABLED        0
 
-#define LED_ACT_GPIO_PORT       GPIOA
-#define LED_ACT_GPIO_PIN        GPIO13 /* PA13 */
+#define LED_ACT_GPIO_PORT       GPIOB
+#define LED_ACT_GPIO_PIN        GPIO3 /* PB3 */
 #define LED_ACT_DISABLED        1
+
+#define LED_RANGE0_GPIO_PORT    LED_RUN_GPIO_PORT
+#define LED_RANGE0_GPIO_PIN     LED_RUN_GPIO_PIN
+#define LED_RANGE1_GPIO_PORT    LED_CON_GPIO_PORT
+#define LED_RANGE1_GPIO_PIN     LED_CON_GPIO_PIN
+#define LED_RANGE2_GPIO_PORT    LED_ACT_GPIO_PORT
+#define LED_RANGE2_GPIO_PIN     LED_ACT_GPIO_PIN
 
 #define SWDIO_GPIO_PIN_NUM      5
 

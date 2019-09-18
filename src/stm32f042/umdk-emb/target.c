@@ -119,7 +119,6 @@ static uint32_t energy_ahr = 0;
 static uint32_t energy_whr = 0;
 static uint32_t current_max_ua = 0;
 static bool update_display = false;
-static volatile uint8_t led_act = 0;
 
 static bool banner_displayed = false;
 static uint32_t do_calibrate = 0;
@@ -127,6 +126,8 @@ static volatile uint32_t cal_voltage = 0;
 static volatile int current_power_range = 0;
 static volatile uint8_t cmd_int = 0;
 static volatile bool dap_connected = false;
+
+static volatile bool board_v2 = false;
 
 #define USB_COMMAND_SIZE    20
 
@@ -152,6 +153,7 @@ typedef enum {
     CMD_INT_LCDOUT      = 1 << 2,
 } internal_commands_t;
 
+/* emb_settings size must be multiple of 4 */
 static volatile struct {
     uint32_t magic;
     uint32_t voltage_coeff;
@@ -161,11 +163,13 @@ static volatile struct {
     uint32_t dap_active;
 } emb_settings;
 
+/* last flash page (1KB on STM32F042) is for settings */
+/* so max firmware size is 32768 - 1024 = 31744 bytes */
 static void save_settings(void) {
     flash_unlock();
     flash_erase_page(FLASH_CONFIG_ADDR);
     flash_program_word(FLASH_CONFIG_ADDR, FLASH_CONFIG_MAGIC);
-    
+
     uint32_t *settings = (void *)&emb_settings;
     for (unsigned i = 1; i < sizeof(emb_settings)/4; i++) {
         flash_program_word(FLASH_CONFIG_ADDR + i*4, settings[i]);
@@ -549,12 +553,6 @@ void adc_comp_isr(void)
         }
     }
 
-    if (range + delta == 2) {
-        gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
-    } else {
-        gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
-    }
-
     current_power_range += delta;
 
     uint32_t data = 0;
@@ -874,11 +872,25 @@ void systick_activity(void)
     
     /* every 100 ms */
     if (current_report_counter && (current_report_counter % 100 == 0)) {
-        if (led_act) {
-            if (--led_act) {
-                gpio_clear(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
-            } else {
-                gpio_set(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN);
+        /* LED functions on v1 and v2 boards are different */
+        if (board_v2) {
+            gpio_set(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
+            gpio_set(LED_RANGE1_GPIO_PORT, LED_RANGE1_GPIO_PIN);
+            gpio_set(LED_RANGE2_GPIO_PORT, LED_RANGE2_GPIO_PIN);
+            
+            switch (current_power_range) {
+                case 0:
+                    gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
+                    break;
+                case 1:
+                    gpio_clear(LED_RANGE1_GPIO_PORT, LED_RANGE1_GPIO_PIN);
+                    break;
+                case 2:
+                    gpio_clear(LED_RANGE2_GPIO_PORT, LED_RANGE2_GPIO_PIN);
+                    break;
+                default:
+                    gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
+                    break;
             }
         }
 
@@ -1065,7 +1077,9 @@ void systick_activity(void)
                 target_release_boot = 500;
             } else {
                 /* Enable green LED */
-                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+                if (!board_v2) {
+                    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+                }
             }            
             target_release_reset = 1;
         }
@@ -1076,7 +1090,9 @@ void systick_activity(void)
             target_power_state = !target_power_state;
             
             /* Enable green LED */
-            gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+            if (!board_v2) {
+                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+            }
         
             /* Toggle power */
             if (target_power_state) {
@@ -1102,7 +1118,9 @@ void systick_activity(void)
                 current_max_ua = 0;
                 
                 /* enable green LED */
-                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+                if (!board_v2) {
+                    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+                }
 
                 target_boot_state = false;
                 target_power_failure = 0;
@@ -1336,10 +1354,14 @@ void gpio_setup(void) {
     /* Setup LEDs as open-drain outputs */
     gpio_set_output_options(LED_CON_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_CON_GPIO_PIN);
     gpio_mode_setup(LED_CON_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_CON_GPIO_PIN);
-                
+
     gpio_set_output_options(LED_RUN_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_RUN_GPIO_PIN);
     gpio_mode_setup(LED_RUN_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_RUN_GPIO_PIN);
-                
+
+    gpio_mode_setup(LED_ACT_GPIO_PORT, GPIO_MODE_INPUT, GPIO_PUPD_NONE, LED_ACT_GPIO_PIN);
+    if (gpio_get(LED_ACT_GPIO_PORT, LED_ACT_GPIO_PIN) != 0) {
+        board_v2 = true;
+    }
     gpio_set_output_options(LED_ACT_GPIO_PORT, GPIO_OTYPE_OD, GPIO_OSPEED_HIGH, LED_ACT_GPIO_PIN);
     gpio_mode_setup(LED_ACT_GPIO_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED_ACT_GPIO_PIN);
 
@@ -1428,7 +1450,11 @@ void gpio_setup(void) {
     }
 
     /* enable green LED */
-    gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+    if (!board_v2) {
+        gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
+    } else {
+        gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
+    }
 }
 
 void target_console_init(void) {
@@ -1480,10 +1506,12 @@ void led_num(uint8_t value) {
 #endif
 
 #if !defined(LED_RUN_DISABLED) || !LED_RUN_DISABLED
-    if (value & 0x2) {
-        gpio_clear(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
-    } else {
-        gpio_set(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
+    if (!board_v2) {
+        if (value & 0x2) {
+            gpio_clear(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
+        } else {
+            gpio_set(LED_RUN_GPIO_PORT, LED_RUN_GPIO_PIN);
+        }
     }
 #endif
 
