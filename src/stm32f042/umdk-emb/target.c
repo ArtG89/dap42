@@ -209,8 +209,6 @@ static void disable_power(void) {
     
     /* Disable output power */
     gpio_clear(POWER_OUTPUT_EN_PORT, POWER_OUTPUT_EN_PIN);
-    /* Disable green LED */
-    /* gpio_set(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN); */
 
     target_power_state = false;
     target_boot_state = false;
@@ -873,24 +871,24 @@ void systick_activity(void)
     /* every 100 ms */
     if (current_report_counter && (current_report_counter % 100 == 0)) {
         /* LED functions on v1 and v2 boards are different */
-        if (board_v2) {
-            gpio_set(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
+        if (board_v2 && !target_boot_state) {
+            gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
             gpio_set(LED_RANGE1_GPIO_PORT, LED_RANGE1_GPIO_PIN);
             gpio_set(LED_RANGE2_GPIO_PORT, LED_RANGE2_GPIO_PIN);
             
-            switch (current_power_range) {
-                case 0:
-                    gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
-                    break;
-                case 1:
-                    gpio_clear(LED_RANGE1_GPIO_PORT, LED_RANGE1_GPIO_PIN);
-                    break;
-                case 2:
-                    gpio_clear(LED_RANGE2_GPIO_PORT, LED_RANGE2_GPIO_PIN);
-                    break;
-                default:
-                    gpio_clear(LED_RANGE0_GPIO_PORT, LED_RANGE0_GPIO_PIN);
-                    break;
+            if (target_power_state) {
+                switch (current_power_range) {
+                    case 2:
+                        gpio_clear(LED_RANGE2_GPIO_PORT, LED_RANGE2_GPIO_PIN);
+                        /* fall-through */
+                    case 1:
+                        gpio_clear(LED_RANGE1_GPIO_PORT, LED_RANGE1_GPIO_PIN);
+                        /* fall-through */
+                    case 0:
+                        break;
+                    default:
+                        break;
+                }
             }
         }
 
@@ -1088,12 +1086,7 @@ void systick_activity(void)
         if ((button1_counter >= 100) && (button1_counter < 1000)) {
             /* 100 ms short press */    
             target_power_state = !target_power_state;
-            
-            /* Enable green LED */
-            if (!board_v2) {
-                gpio_clear(LED_CON_GPIO_PORT, LED_CON_GPIO_PIN);
-            }
-        
+
             /* Toggle power */
             if (target_power_state) {
                 /* Reset target */
